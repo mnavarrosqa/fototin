@@ -7,8 +7,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
@@ -26,16 +27,23 @@ import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
+import androidx.glance.layout.Column
 import androidx.glance.layout.ContentScale
+import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import app.fototin.R
+import app.fototin.data.Photo
 import app.fototin.data.PhotoRepository
 import app.fototin.ui.MainActivity
-import java.io.File
+import java.text.DateFormat
+import java.util.Date
 
 class FotoWidget : GlanceAppWidget() {
 
@@ -49,22 +57,23 @@ class FotoWidget : GlanceAppWidget() {
             if (photos.isEmpty()) {
                 EmptyContent()
             } else {
-                val index = (prefs[KEY_INDEX] ?: 0).mod(photos.size)
-                PhotoContent(photos[index], WidgetStyle.from(prefs[KEY_STYLE]))
+                val photo = photos.firstOrNull { it.id == prefs[KEY_PHOTO_ID] } ?: photos.first()
+                PhotoContent(photo, WidgetStyle.from(prefs[KEY_STYLE]), prefs[KEY_SHOW_DATE] ?: false)
             }
         }
     }
 
     @Composable
-    private fun PhotoContent(file: File, style: WidgetStyle) {
+    private fun PhotoContent(photo: Photo, style: WidgetStyle, showDate: Boolean) {
         val context = LocalContext.current
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
-        val bitmap = remember(file, style, size) {
+        val bitmap = remember(photo.id, style, showDate, size) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
-            PhotoRepository.decodeForSize(file, maxOf(w, h))?.let { source ->
-                PhotoStyler.render(source, style, w, h, density).also { source.recycle() }
+            val caption = if (showDate) formatDate(photo.takenAt) else null
+            PhotoRepository.decodeForSize(photo.file, maxOf(w, h))?.let { source ->
+                PhotoStyler.render(source, style, w, h, density, caption).also { source.recycle() }
             }
         }
         Box(
@@ -74,7 +83,7 @@ class FotoWidget : GlanceAppWidget() {
             if (bitmap != null) {
                 Image(
                     provider = ImageProvider(bitmap),
-                    contentDescription = "Foto",
+                    contentDescription = "Foto del ${formatDate(photo.takenAt)}",
                     contentScale = ContentScale.Fit,
                     modifier = GlanceModifier.fillMaxSize(),
                 )
@@ -84,20 +93,27 @@ class FotoWidget : GlanceAppWidget() {
 
     @Composable
     private fun EmptyContent() {
-        Box(
+        Column(
             modifier = GlanceModifier
                 .fillMaxSize()
-                .cornerRadius(24.dp)
-                .background(Color(0xFFF3B4A6))
+                .cornerRadius(28.dp)
+                .background(Color(0xFFFBE3DA))
                 .padding(12.dp)
                 .clickable(actionStartActivity<MainActivity>()),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_empty),
+                contentDescription = null,
+            )
+            Spacer(GlanceModifier.height(8.dp))
             Text(
-                text = "Tocá para elegir tus fotos",
+                text = "Elegí tus fotos",
                 style = TextStyle(
-                    color = ColorProvider(Color(0xFF3A2A26)),
+                    color = ColorProvider(Color(0xFF5C2A20)),
                     fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                 ),
             )
@@ -105,7 +121,12 @@ class FotoWidget : GlanceAppWidget() {
     }
 
     companion object {
-        val KEY_INDEX = intPreferencesKey("index")
+        val KEY_PHOTO_ID = stringPreferencesKey("photo_id")
+        val KEY_SEEN = stringSetPreferencesKey("seen")
         val KEY_STYLE = stringPreferencesKey("style")
+        val KEY_SHOW_DATE = booleanPreferencesKey("show_date")
+
+        fun formatDate(millis: Long): String =
+            DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis))
     }
 }

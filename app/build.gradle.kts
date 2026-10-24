@@ -12,13 +12,31 @@ android {
         applicationId = "app.fototin"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // En CI cada build tiene un número mayor, así Android acepta instalarlo encima.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionName = "0.2.${versionCode}"
+    }
+
+    signingConfigs {
+        // Clave fija incluida en el repo para que cada APK de CI se pueda instalar como
+        // actualización del anterior. Para publicar en Play Store hay que usar una clave privada.
+        create("fototin") {
+            storeFile = file("fototin.keystore")
+            storePassword = "fototin"
+            keyAlias = "fototin"
+            keyPassword = "fototin"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fototin")
+        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("fototin")
         }
     }
     compileOptions {
@@ -38,6 +56,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.exifinterface)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
