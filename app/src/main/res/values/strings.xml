@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fototin</string>
+    <string name="widget_name">Foto</string>
+    <string name="widget_description">Tus fotos favoritas en la pantalla de inicio</string>
+</resources>

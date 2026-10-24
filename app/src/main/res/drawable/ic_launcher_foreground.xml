@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Marco de foto con sol y montañas, dentro de la zona segura de 66dp -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,32h36a6,6 0,0 1,6 6v32a6,6 0,0 1,-6 6h-36a6,6 0,0 1,-6 -6v-32a6,6 0,0 1,6 -6z" />
+    <path
+        android:fillColor="#FFF7C948"
+        android:pathData="M64,44m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#FF5B8DEF"
+        android:pathData="M34,70l13,-17l9,11l6,-7l12,13z" />
+</vector>
