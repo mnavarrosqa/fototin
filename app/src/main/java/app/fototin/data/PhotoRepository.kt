@@ -68,8 +68,8 @@ class PhotoRepository(context: Context) {
         all.map { it.toPhoto() }
     }
 
-    /** Importa las fotos de a varias a la vez. Devuelve cuántas se pudieron importar. */
-    suspend fun import(uris: List<Uri>, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): Int =
+    /** Importa las fotos de a varias a la vez. Devuelve los ids de las que se pudieron importar. */
+    suspend fun import(uris: List<Uri>, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): List<String> =
         withContext(Dispatchers.IO) {
             val done = AtomicInteger()
             val permits = Semaphore(IMPORT_PARALLELISM)
@@ -84,7 +84,7 @@ class PhotoRepository(context: Context) {
                 }.awaitAll().filterNotNull()
             }
             synchronized(lock) { writeIndex(readIndex() + imported) }
-            imported.size
+            imported.map { it.id }
         }
 
     suspend fun remove(ids: Collection<String>) = withContext(Dispatchers.IO) {

@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
@@ -52,12 +53,16 @@ import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.lifecycle.lifecycleScope
+import app.fototin.data.Album
+import app.fototin.data.AlbumRepository
 import app.fototin.data.Photo
+import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.ui.FototinTheme
 import app.fototin.widget.FotoWidget
 import app.fototin.widget.PhotoStyler
 import app.fototin.widget.WidgetStyle
+import app.fototin.data.WidgetSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,14 +87,14 @@ class WidgetConfigActivity : ComponentActivity() {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
             val prefs = getAppWidgetState(this@WidgetConfigActivity, PreferencesGlanceStateDefinition, glanceId)
-            val photos = withContext(Dispatchers.IO) { PhotoRepository(this@WidgetConfigActivity).list() }
-            // Mostrar la foto que el widget tiene ahora, así la vista previa es fiel.
-            val photo = photos.firstOrNull { it.id == prefs[FotoWidget.KEY_PHOTO_ID] } ?: photos.lastOrNull()
+            val albums = withContext(Dispatchers.IO) { AlbumRepository(this@WidgetConfigActivity).list() }
 
             setContent {
                 FototinTheme {
                     ConfigScreen(
-                        photo = photo,
+                        albums = albums,
+                        currentPhotoId = prefs[FotoWidget.KEY_PHOTO_ID],
+                        initialSource = WidgetSource.from(prefs[FotoWidget.KEY_SOURCE]),
                         initialStyle = WidgetStyle.from(prefs[FotoWidget.KEY_STYLE]),
                         initialShowDate = prefs[FotoWidget.KEY_SHOW_DATE] ?: false,
                         onSave = ::save,
@@ -99,10 +104,11 @@ class WidgetConfigActivity : ComponentActivity() {
         }
     }
 
-    private fun save(style: WidgetStyle, showDate: Boolean) {
+    private fun save(source: WidgetSource, style: WidgetStyle, showDate: Boolean) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
             updateAppWidgetState(this@WidgetConfigActivity, glanceId) {
+                it[FotoWidget.KEY_SOURCE] = source.key
                 it[FotoWidget.KEY_STYLE] = style.name
                 it[FotoWidget.KEY_SHOW_DATE] = showDate
             }
@@ -121,23 +127,40 @@ class WidgetConfigActivity : ComponentActivity() {
 
     @Composable
     private fun ConfigScreen(
-        photo: Photo?,
+        albums: List<Album>,
+        currentPhotoId: String?,
+        initialSource: WidgetSource,
         initialStyle: WidgetStyle,
         initialShowDate: Boolean,
-        onSave: (WidgetStyle, Boolean) -> Unit,
+        onSave: (WidgetSource, WidgetStyle, Boolean) -> Unit,
     ) {
+        // Si el álbum elegido se borró, volver a "Todas".
+        var source by remember {
+            mutableStateOf(
+                initialSource.takeIf { s -> s !is WidgetSource.FromAlbum || albums.any { it.id == s.albumId } }
+                    ?: WidgetSource.All,
+            )
+        }
         var style by remember { mutableStateOf(initialStyle) }
         var showDate by remember { mutableStateOf(initialShowDate) }
+
+        // Mostrar la foto que el widget tiene ahora, si sigue entre las elegidas, así la vista previa es fiel.
+        val photo by produceState<Photo?>(null, source) {
+            value = withContext(Dispatchers.IO) {
+                val pool = PhotoPool.resolve(this@WidgetConfigActivity, source)
+                pool.firstOrNull { it.id == currentPhotoId } ?: pool.lastOrNull()
+            }
+        }
         // Fuente decodificada una sola vez para todas las vistas previas.
-        val source by produceState<Bitmap?>(null, photo) {
+        val sourceBitmap by produceState<Bitmap?>(null, photo) {
             value = photo?.let { withContext(Dispatchers.IO) { PhotoRepository.decodeForSize(it.file, 720) } }
         }
-        val caption = photo?.takeIf { showDate }?.let { FotoWidget.formatDate(it.takenAt) }
-        val large by produceState<Bitmap?>(null, source, style, caption) {
-            value = source?.let { withContext(Dispatchers.Default) { PhotoStyler.render(it, style, 720, 720, 720f / PREVIEW_DP, caption) } }
+        val caption = photo?.let { PhotoPool.caption(it, source, showDate) }
+        val large by produceState<Bitmap?>(null, sourceBitmap, style, caption) {
+            value = sourceBitmap?.let { withContext(Dispatchers.Default) { PhotoStyler.render(it, style, 720, 720, 720f / PREVIEW_DP, caption) } }
         }
-        val thumbs by produceState<Map<WidgetStyle, Bitmap>>(emptyMap(), source) {
-            value = source?.let { src ->
+        val thumbs by produceState<Map<WidgetStyle, Bitmap>>(emptyMap(), sourceBitmap) {
+            value = sourceBitmap?.let { src ->
                 withContext(Dispatchers.Default) {
                     WidgetStyle.entries.associateWith { PhotoStyler.render(src, it, 240, 240, 240f / PREVIEW_DP) }
                 }
@@ -147,11 +170,13 @@ class WidgetConfigActivity : ComponentActivity() {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.safeDrawingPadding().padding(vertical = 16.dp)) {
                 Text(
-                    "Elegí un estilo",
+                    "Configurá tu widget",
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.padding(horizontal = 20.dp),
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
+                SourcePicker(albums, source, onSelect = { source = it })
+                Spacer(Modifier.height(12.dp))
                 Card(
                     shape = RoundedCornerShape(32.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -163,7 +188,11 @@ class WidgetConfigActivity : ComponentActivity() {
                     ) {
                         if (photo == null) {
                             Text(
-                                "Agregá fotos desde la app para ver la vista previa.",
+                                if (source is WidgetSource.FromAlbum) {
+                                    "Este álbum todavía no tiene fotos."
+                                } else {
+                                    "Agregá fotos desde la app para ver la vista previa."
+                                },
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -186,7 +215,7 @@ class WidgetConfigActivity : ComponentActivity() {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(
+                if (source != WidgetSource.Memories) Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 20.dp),
                 ) {
@@ -202,11 +231,39 @@ class WidgetConfigActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.height(16.dp))
                 Button(
-                    onClick = { onSave(style, showDate) },
+                    onClick = { onSave(source, style, showDate) },
                     modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(52.dp),
                 ) {
                     Text("Listo")
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun SourcePicker(albums: List<Album>, selected: WidgetSource, onSelect: (WidgetSource) -> Unit) {
+        val options = listOf(WidgetSource.All to "Todas", WidgetSource.Memories to "Recuerdos") +
+            albums.map { WidgetSource.FromAlbum(it.id) to it.name }
+        Column {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(options, key = { it.first.key }) { (option, label) ->
+                    FilterChip(
+                        selected = option == selected,
+                        onClick = { onSelect(option) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            if (selected == WidgetSource.Memories) {
+                Text(
+                    "Fotos de un día como hoy en otros años, con cuántos años pasaron.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
             }
         }
     }

@@ -11,8 +11,9 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import app.fototin.data.PhotoRepository
+import app.fototin.data.PhotoPool
 import app.fototin.data.Settings
+import app.fototin.data.WidgetSource
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,10 +23,11 @@ import java.util.concurrent.TimeUnit
  * ya vio y empieza una ronda nueva cuando se terminan.
  */
 suspend fun advancePhoto(context: Context, glanceId: GlanceId) {
-    val ids = PhotoRepository(context).list().map { it.id }
-    if (ids.isEmpty()) return
     val shuffle = Settings(context).shuffle
     updateAppWidgetState(context, glanceId) { prefs ->
+        val source = WidgetSource.from(prefs[FotoWidget.KEY_SOURCE])
+        val ids = PhotoPool.resolve(context, source).map { it.id }
+        if (ids.isEmpty()) return@updateAppWidgetState
         val current = prefs[FotoWidget.KEY_PHOTO_ID]?.takeIf { it in ids } ?: ids.first()
         prefs[FotoWidget.KEY_PHOTO_ID] = if (shuffle && ids.size > 1) {
             var seen = prefs[FotoWidget.KEY_SEEN].orEmpty().intersect(ids.toSet()) + current
