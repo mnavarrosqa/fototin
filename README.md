@@ -16,12 +16,17 @@ Abrilo desde el teléfono para instalar o actualizar. Requiere Android 9 o super
   reconfigurar manteniéndolo presionado).
 - **Rotación automática** cada 15 min, 1 h, 6 h o 1 día. En orden aleatorio no se repite
   ninguna foto hasta haberlas mostrado todas. Tocar el widget pasa a la siguiente.
-- **Administrar fotos:** mantené presionada una foto para seleccionar varias y quitarlas.
+- **Álbumes:** agrupá fotos (Vacaciones, Familia…) y elegí qué álbum muestra cada widget.
+- **Recuerdos:** un widget puede mostrar fotos de un día como hoy en otros años, con la
+  leyenda "Hace N años". Si ese día no hay, usa la misma semana o el mismo mes.
+- **Administrar fotos:** mantené presionada una foto para seleccionar varias y sumarlas a un
+  álbum, sacarlas de él o borrarlas de Fototin (las originales no se tocan).
 
 ## Cómo funciona
 
 - Las fotos elegidas se copian (reducidas a 1600 px, más una miniatura de 360 px para la grilla)
-  a la carpeta privada de la app; los datos de cada una (tamaño y fecha) van en `photos.json`.
+  a la carpeta privada de la app; los datos de cada una (tamaño y fecha) van en `photos.json` y
+  los álbumes en `albums.json`. `PhotoPool` decide qué fotos le tocan a cada widget.
   Así el widget no depende de permisos temporales ni de conexión.
 - El widget está hecho con [Jetpack Glance](https://developer.android.com/develop/ui/compose/glance);
   cada estilo se dibuja en un bitmap del tamaño exacto del widget (`PhotoStyler`).

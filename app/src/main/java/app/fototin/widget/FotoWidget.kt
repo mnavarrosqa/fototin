@@ -40,38 +40,38 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import app.fototin.R
 import app.fototin.data.Photo
+import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
+import app.fototin.data.WidgetSource
 import app.fototin.ui.MainActivity
-import java.text.DateFormat
-import java.util.Date
 
 class FotoWidget : GlanceAppWidget() {
 
     override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val repository = PhotoRepository(context)
         provideContent {
             val prefs = currentState<Preferences>()
-            val photos = repository.list()
+            val source = WidgetSource.from(prefs[KEY_SOURCE])
+            val photos = PhotoPool.resolve(context, source)
             if (photos.isEmpty()) {
-                EmptyContent()
+                EmptyContent(if (source is WidgetSource.FromAlbum) "Este álbum está vacío" else "Elegí tus fotos")
             } else {
                 val photo = photos.firstOrNull { it.id == prefs[KEY_PHOTO_ID] } ?: photos.first()
-                PhotoContent(photo, WidgetStyle.from(prefs[KEY_STYLE]), prefs[KEY_SHOW_DATE] ?: false)
+                val caption = PhotoPool.caption(photo, source, prefs[KEY_SHOW_DATE] ?: false)
+                PhotoContent(photo, WidgetStyle.from(prefs[KEY_STYLE]), caption)
             }
         }
     }
 
     @Composable
-    private fun PhotoContent(photo: Photo, style: WidgetStyle, showDate: Boolean) {
+    private fun PhotoContent(photo: Photo, style: WidgetStyle, caption: String?) {
         val context = LocalContext.current
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
-        val bitmap = remember(photo.id, style, showDate, size) {
+        val bitmap = remember(photo.id, style, caption, size) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
-            val caption = if (showDate) formatDate(photo.takenAt) else null
             PhotoRepository.decodeForSize(photo.file, maxOf(w, h))?.let { source ->
                 PhotoStyler.render(source, style, w, h, density, caption).also { source.recycle() }
             }
@@ -83,7 +83,7 @@ class FotoWidget : GlanceAppWidget() {
             if (bitmap != null) {
                 Image(
                     provider = ImageProvider(bitmap),
-                    contentDescription = "Foto del ${formatDate(photo.takenAt)}",
+                    contentDescription = "Foto del ${PhotoPool.formatDate(photo.takenAt)}",
                     contentScale = ContentScale.Fit,
                     modifier = GlanceModifier.fillMaxSize(),
                 )
@@ -92,7 +92,7 @@ class FotoWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun EmptyContent() {
+    private fun EmptyContent(message: String) {
         Column(
             modifier = GlanceModifier
                 .fillMaxSize()
@@ -109,7 +109,7 @@ class FotoWidget : GlanceAppWidget() {
             )
             Spacer(GlanceModifier.height(8.dp))
             Text(
-                text = "Elegí tus fotos",
+                text = message,
                 style = TextStyle(
                     color = ColorProvider(Color(0xFF5C2A20)),
                     fontSize = 14.sp,
@@ -125,8 +125,7 @@ class FotoWidget : GlanceAppWidget() {
         val KEY_SEEN = stringSetPreferencesKey("seen")
         val KEY_STYLE = stringPreferencesKey("style")
         val KEY_SHOW_DATE = booleanPreferencesKey("show_date")
-
-        fun formatDate(millis: Long): String =
-            DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis))
+        /** Clave de [WidgetSource]: todas las fotos, recuerdos o un álbum. */
+        val KEY_SOURCE = stringPreferencesKey("source")
     }
 }
