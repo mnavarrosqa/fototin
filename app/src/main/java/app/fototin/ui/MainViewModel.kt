@@ -2,7 +2,6 @@ package app.fototin.ui
 
 import android.app.Application
 import android.net.Uri
-import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.fototin.data.Album
@@ -11,8 +10,8 @@ import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.data.Settings
-import app.fototin.widget.FotoWidget
 import app.fototin.widget.RotationScheduler
+import app.fototin.widget.WidgetSupport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -75,7 +74,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             reload()
-            repository.ensureThumbnails()
+            // Fotos de versiones anteriores: miniaturas y encuadre de caras.
+            if (repository.completeMissingData()) refresh()
         }
     }
 
@@ -170,6 +170,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refresh() {
         reload()
-        FotoWidget().updateAll(getApplication())
+        WidgetSupport.updateAll(getApplication())
     }
 }

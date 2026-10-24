@@ -7,15 +7,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalContext
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -41,9 +41,9 @@ import androidx.glance.unit.ColorProvider
 import app.fototin.R
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
-import app.fototin.data.PhotoRepository
 import app.fototin.data.WidgetSource
 import app.fototin.ui.MainActivity
+import app.fototin.ui.PhotoViewerActivity
 
 class FotoWidget : GlanceAppWidget() {
 
@@ -52,32 +52,43 @@ class FotoWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val prefs = currentState<Preferences>()
-            val source = WidgetSource.from(prefs[KEY_SOURCE])
+            val source = WidgetSource.from(prefs[WidgetKeys.SOURCE])
             val photos = PhotoPool.resolve(context, source)
             if (photos.isEmpty()) {
-                EmptyContent(if (source is WidgetSource.FromAlbum) "Este álbum está vacío" else "Elegí tus fotos")
+                EmptyWidget(if (source is WidgetSource.FromAlbum) "Este álbum está vacío" else "Elegí tus fotos")
             } else {
-                val photo = photos.firstOrNull { it.id == prefs[KEY_PHOTO_ID] } ?: photos.first()
-                val caption = PhotoPool.caption(photo, source, prefs[KEY_SHOW_DATE] ?: false)
-                PhotoContent(photo, WidgetStyle.from(prefs[KEY_STYLE]), caption)
+                val photo = photos.firstOrNull { it.id == prefs[WidgetKeys.PHOTO_ID] } ?: photos.first()
+                val caption = PhotoPool.caption(photo, source, prefs[WidgetKeys.SHOW_DATE] ?: false)
+                val tap = when (TapAction.from(prefs[WidgetKeys.TAP])) {
+                    TapAction.NEXT -> actionRunCallback<NextPhotoAction>()
+                    TapAction.VIEW -> actionStartActivity<PhotoViewerActivity>(
+                        actionParametersOf(
+                            ActionParameters.Key<String>(PhotoViewerActivity.EXTRA_PHOTO_ID) to photo.id,
+                            ActionParameters.Key<String>(PhotoViewerActivity.EXTRA_SOURCE) to source.key,
+                        ),
+                    )
+                    TapAction.OPEN_APP -> actionStartActivity<MainActivity>()
+                }
+                PhotoContent(photo, WidgetStyle.from(prefs[WidgetKeys.STYLE]), caption, tap)
             }
         }
     }
 
     @Composable
-    private fun PhotoContent(photo: Photo, style: WidgetStyle, caption: String?) {
+    private fun PhotoContent(photo: Photo, style: WidgetStyle, caption: String?, tap: Action) {
         val context = LocalContext.current
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
         val bitmap = remember(photo.id, style, caption, size) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
-            PhotoRepository.decodeForSize(photo.file, maxOf(w, h))?.let { source ->
-                PhotoStyler.render(source, style, w, h, density, caption).also { source.recycle() }
+            WidgetSupport.load(photo, maxOf(w, h))?.let { source ->
+                val corner = WidgetSupport.launcherCornerDp(context, fallback = 28f)
+                PhotoStyler.render(source, style, w, h, density, caption, corner).also { source.bitmap.recycle() }
             }
         }
         Box(
-            modifier = GlanceModifier.fillMaxSize().clickable(actionRunCallback<NextPhotoAction>()),
+            modifier = GlanceModifier.fillMaxSize().clickable(tap),
             contentAlignment = Alignment.Center,
         ) {
             if (bitmap != null) {
@@ -90,42 +101,34 @@ class FotoWidget : GlanceAppWidget() {
             }
         }
     }
+}
 
-    @Composable
-    private fun EmptyContent(message: String) {
-        Column(
-            modifier = GlanceModifier
-                .fillMaxSize()
-                .cornerRadius(28.dp)
-                .background(Color(0xFFFBE3DA))
-                .padding(12.dp)
-                .clickable(actionStartActivity<MainActivity>()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Image(
-                provider = ImageProvider(R.drawable.ic_widget_empty),
-                contentDescription = null,
-            )
-            Spacer(GlanceModifier.height(8.dp))
-            Text(
-                text = message,
-                style = TextStyle(
-                    color = ColorProvider(Color(0xFF5C2A20)),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-        }
-    }
-
-    companion object {
-        val KEY_PHOTO_ID = stringPreferencesKey("photo_id")
-        val KEY_SEEN = stringSetPreferencesKey("seen")
-        val KEY_STYLE = stringPreferencesKey("style")
-        val KEY_SHOW_DATE = booleanPreferencesKey("show_date")
-        /** Clave de [WidgetSource]: todas las fotos, recuerdos o un álbum. */
-        val KEY_SOURCE = stringPreferencesKey("source")
+/** Lo que muestran los widgets cuando no tienen fotos: invita a abrir la app. */
+@Composable
+fun EmptyWidget(message: String) {
+    Column(
+        modifier = GlanceModifier
+            .fillMaxSize()
+            .cornerRadius(28.dp)
+            .background(Color(0xFFFBE3DA))
+            .padding(12.dp)
+            .clickable(actionStartActivity<MainActivity>()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(
+            provider = ImageProvider(R.drawable.ic_widget_empty),
+            contentDescription = null,
+        )
+        Spacer(GlanceModifier.height(8.dp))
+        Text(
+            text = message,
+            style = TextStyle(
+                color = ColorProvider(Color(0xFF5C2A20)),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+            ),
+        )
     }
 }

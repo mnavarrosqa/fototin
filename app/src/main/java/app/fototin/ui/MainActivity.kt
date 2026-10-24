@@ -13,6 +13,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
+import app.fototin.widget.CollageWidgetReceiver
 import app.fototin.widget.FotoWidgetReceiver
 import app.fototin.widget.RotationScheduler
 
@@ -64,11 +65,12 @@ class MainActivity : ComponentActivity() {
         viewModel.import(uris)
     }
 
-    private fun requestPinWidget() {
+    private fun requestPinWidget(collage: Boolean) {
         val manager = AppWidgetManager.getInstance(this)
+        val receiver = if (collage) CollageWidgetReceiver::class.java else FotoWidgetReceiver::class.java
         if (manager.isRequestPinAppWidgetSupported) {
-            // El launcher muestra su diálogo y luego abre la configuración del estilo.
-            manager.requestPinAppWidget(ComponentName(this, FotoWidgetReceiver::class.java), null, null)
+            // El launcher muestra su diálogo y luego abre la configuración del widget.
+            manager.requestPinAppWidget(ComponentName(this, receiver), null, null)
         } else {
             Toast.makeText(
                 this,

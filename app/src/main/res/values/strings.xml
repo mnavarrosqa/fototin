@@ -3,4 +3,6 @@
     <string name="app_name">Fototin</string>
     <string name="widget_name">Foto</string>
     <string name="widget_description">Tus fotos favoritas en la pantalla de inicio</string>
+    <string name="collage_name">Collage</string>
+    <string name="collage_description">Varias fotos a la vez, que cambian juntas</string>
 </resources>

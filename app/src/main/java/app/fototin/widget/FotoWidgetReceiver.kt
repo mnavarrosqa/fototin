@@ -15,6 +15,6 @@ class FotoWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
-        RotationScheduler.cancel(context)
+        RotationScheduler.cancelIfUnused(context)
     }
 }
