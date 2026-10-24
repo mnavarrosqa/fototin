@@ -31,6 +31,9 @@ data class Photo(
     val height: Int,
     /** Fecha en que se sacó la foto (o se importó, si no se conoce), en milisegundos. */
     val takenAt: Long,
+    /** Punto a mantener visible al recortar (0..1), por ejemplo el centro de las caras. */
+    val focusX: Float = FocusFinder.DEFAULT_X,
+    val focusY: Float = FocusFinder.DEFAULT_Y,
 ) {
     val aspectRatio: Float get() = if (width > 0 && height > 0) width.toFloat() / height else 1f
 }
@@ -61,7 +64,7 @@ class PhotoRepository(context: Context) {
             .map { file ->
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(file.path, bounds)
-                Entry(file.nameWithoutExtension, bounds.outWidth, bounds.outHeight, file.lastModified())
+                Entry(file.nameWithoutExtension, bounds.outWidth, bounds.outHeight, file.lastModified(), -1f, -1f)
             }
         val all = (entries + orphans).filter { photoFile(it.id).exists() }
         if (orphans.isNotEmpty() || all.size != entries.size) writeIndex(all)
@@ -97,14 +100,30 @@ class PhotoRepository(context: Context) {
         }
     }
 
-    /** Crea las miniaturas que falten (por ejemplo, de fotos de versiones anteriores). */
-    suspend fun ensureThumbnails() = withContext(Dispatchers.IO) {
+    /**
+     * Completa lo que les falte a las fotos de versiones anteriores: miniatura y punto de foco.
+     * Devuelve true si cambió algo.
+     */
+    suspend fun completeMissingData(): Boolean = withContext(Dispatchers.IO) {
         list().filter { !it.thumb.exists() }.forEach { photo ->
             decodeForSize(photo.file, THUMB_PX)?.let {
                 saveThumb(it, photo.thumb)
                 it.recycle()
             }
         }
+        val missingFocus = synchronized(lock) { readIndex() }.filter { it.focusX < 0f }
+        val found = missingFocus.associate { entry ->
+            val focus = decodeForSize(photoFile(entry.id), FocusFinder.ANALYSIS_PX)?.let { bitmap ->
+                FocusFinder.find(bitmap).also { bitmap.recycle() }
+            } ?: (FocusFinder.DEFAULT_X to FocusFinder.DEFAULT_Y)
+            entry.id to focus
+        }
+        if (found.isNotEmpty()) {
+            synchronized(lock) {
+                writeIndex(readIndex().map { e -> found[e.id]?.let { (x, y) -> e.copy(focusX = x, focusY = y) } ?: e })
+            }
+        }
+        found.isNotEmpty()
     }
 
     private fun importOne(uri: Uri): Entry {
@@ -124,7 +143,8 @@ class PhotoRepository(context: Context) {
         val id = "${System.currentTimeMillis()}_${UUID.randomUUID()}"
         photoFile(id).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         saveThumb(bitmap, thumbFile(id))
-        val entry = Entry(id, bitmap.width, bitmap.height, takenAt(uri) ?: System.currentTimeMillis())
+        val (fx, fy) = FocusFinder.find(bitmap)
+        val entry = Entry(id, bitmap.width, bitmap.height, takenAt(uri) ?: System.currentTimeMillis(), fx, fy)
         bitmap.recycle()
         return entry
     }
@@ -164,7 +184,11 @@ class PhotoRepository(context: Context) {
     private fun photoFile(id: String) = File(photosDir, "$id.jpg")
     private fun thumbFile(id: String) = File(thumbsDir, "$id.jpg")
 
-    private fun Entry.toPhoto() = Photo(id, photoFile(id), thumbFile(id), width, height, takenAt)
+    private fun Entry.toPhoto() = Photo(
+        id, photoFile(id), thumbFile(id), width, height, takenAt,
+        if (focusX < 0f) FocusFinder.DEFAULT_X else focusX,
+        if (focusY < 0f) FocusFinder.DEFAULT_Y else focusY,
+    )
 
     private fun readIndex(): List<Entry> {
         if (!indexFile.exists()) return emptyList()
@@ -172,7 +196,10 @@ class PhotoRepository(context: Context) {
             val array = JSONArray(indexFile.readText())
             (0 until array.length()).map { i ->
                 val o = array.getJSONObject(i)
-                Entry(o.getString("id"), o.optInt("w"), o.optInt("h"), o.optLong("t"))
+                Entry(
+                    o.getString("id"), o.optInt("w"), o.optInt("h"), o.optLong("t"),
+                    o.optDouble("fx", -1.0).toFloat(), o.optDouble("fy", -1.0).toFloat(),
+                )
             }
         }.getOrDefault(emptyList())
     }
@@ -180,7 +207,10 @@ class PhotoRepository(context: Context) {
     private fun writeIndex(entries: List<Entry>) {
         val array = JSONArray()
         entries.forEach {
-            array.put(JSONObject().put("id", it.id).put("w", it.width).put("h", it.height).put("t", it.takenAt))
+            array.put(
+                JSONObject().put("id", it.id).put("w", it.width).put("h", it.height).put("t", it.takenAt)
+                    .put("fx", it.focusX.toDouble()).put("fy", it.focusY.toDouble()),
+            )
         }
         // Escribir y renombrar para no dejar un índice a medias si la app se cierra.
         val tmp = File(indexFile.path + ".tmp")
@@ -188,7 +218,15 @@ class PhotoRepository(context: Context) {
         tmp.renameTo(indexFile)
     }
 
-    private data class Entry(val id: String, val width: Int, val height: Int, val takenAt: Long)
+    /** Un foco negativo significa "todavía no calculado". */
+    private data class Entry(
+        val id: String,
+        val width: Int,
+        val height: Int,
+        val takenAt: Long,
+        val focusX: Float,
+        val focusY: Float,
+    )
 
     companion object {
         private const val MAX_SIDE_PX = 1600

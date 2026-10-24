@@ -102,7 +102,7 @@ private sealed interface Dialog {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: (collage: Boolean) -> Unit) {
     val photos by viewModel.photos.collectAsState()
     val visible by viewModel.visiblePhotos.collectAsState()
     val albums by viewModel.albums.collectAsState()
@@ -281,7 +281,7 @@ fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: 
 }
 
 @Composable
-private fun Header(stack: List<Photo>, memoriesCount: Int, onAddWidget: () -> Unit) {
+private fun Header(stack: List<Photo>, memoriesCount: Int, onAddWidget: (collage: Boolean) -> Unit) {
     Column {
         Text("Fototin", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(12.dp))
@@ -307,13 +307,32 @@ private fun Header(stack: List<Photo>, memoriesCount: Int, onAddWidget: () -> Un
                         if (memoriesCount > 0) {
                             "Fotos de un día como hoy en otros años. Elegí «Recuerdos» al configurar un widget."
                         } else {
-                            "Cada widget puede mostrar todas tus fotos, un álbum o tus recuerdos."
+                            "Una foto o un collage, con todas tus fotos, un álbum o tus recuerdos."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = onAddWidget) { Text("Agregar widget") }
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        Button(onClick = { menu = true }) { Text("Agregar widget") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Foto") },
+                                onClick = {
+                                    menu = false
+                                    onAddWidget(false)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Collage de fotos") },
+                                onClick = {
+                                    menu = false
+                                    onAddWidget(true)
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
