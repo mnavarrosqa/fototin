@@ -16,9 +16,15 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_SHUFFLE, false)
         set(value) = prefs.edit().putBoolean(KEY_SHUFFLE, value).apply()
 
+    /** Ordenar la grilla por fecha de la foto (true) o por fecha en que se agregó (false). */
+    var sortByTaken: Boolean
+        get() = prefs.getBoolean(KEY_SORT_TAKEN, false)
+        set(value) = prefs.edit().putBoolean(KEY_SORT_TAKEN, value).apply()
+
     companion object {
         private const val KEY_INTERVAL = "interval_minutes"
         private const val KEY_SHUFFLE = "shuffle"
+        private const val KEY_SORT_TAKEN = "sort_taken"
 
         /** WorkManager no permite intervalos periódicos menores a 15 minutos. */
         val INTERVAL_OPTIONS = listOf(0, 15, 60, 360, 1440)

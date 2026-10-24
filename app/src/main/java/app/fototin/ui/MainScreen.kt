@@ -88,6 +88,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.fototin.data.Album
 import app.fototin.data.Photo
+import app.fototin.widget.PlacedWidget
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import java.util.Calendar
 import app.fototin.data.Settings
 import coil.compose.AsyncImage
 
@@ -102,7 +113,12 @@ private sealed interface Dialog {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: (collage: Boolean) -> Unit) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    onPickPhotos: () -> Unit,
+    onAddWidget: (collage: Boolean) -> Unit,
+    onEditWidget: (appWidgetId: Int) -> Unit,
+) {
     val photos by viewModel.photos.collectAsState()
     val visible by viewModel.visiblePhotos.collectAsState()
     val albums by viewModel.albums.collectAsState()
@@ -112,8 +128,15 @@ fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: 
     val selection by viewModel.selection.collectAsState()
     val interval by viewModel.interval.collectAsState()
     val shuffle by viewModel.shuffle.collectAsState()
+    val sortByTaken by viewModel.sortByTaken.collectAsState()
+    val widgets by viewModel.widgets.collectAsState()
+    val openPhoto by viewModel.openPhoto.collectAsState()
 
     var dialog by remember { mutableStateOf<Dialog?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
 
     val selecting = selection.isNotEmpty()
     BackHandler(enabled = selecting || currentAlbum != null) {
@@ -123,104 +146,151 @@ fun MainScreen(viewModel: MainViewModel, onPickPhotos: () -> Unit, onAddWidget: 
     val gridState = rememberLazyStaggeredGridState()
     val atTop by remember { derivedStateOf { gridState.firstVisibleItemIndex == 0 } }
 
-    Scaffold(
-        topBar = {
-            AnimatedVisibility(visible = selecting, enter = fadeIn(), exit = fadeOut()) {
-                TopAppBar(
-                    title = { Text("${selection.size} seleccionadas") },
-                    navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
-                            Icon(Icons.Filled.Close, contentDescription = "Cancelar")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { dialog = Dialog.AddToAlbum }) {
-                            Icon(Icons.Filled.AddCircle, contentDescription = "Agregar a un álbum")
-                        }
-                        if (currentAlbum != null) {
-                            IconButton(onClick = viewModel::removeSelectedFromAlbum) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Quitar del álbum")
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
+            topBar = {
+                AnimatedVisibility(visible = selecting, enter = fadeIn(), exit = fadeOut()) {
+                    TopAppBar(
+                        title = { Text("${selection.size} seleccionadas") },
+                        navigationIcon = {
+                            IconButton(onClick = viewModel::clearSelection) {
+                                Icon(Icons.Filled.Close, contentDescription = "Cancelar")
                             }
+                        },
+                        actions = {
+                            IconButton(onClick = { dialog = Dialog.AddToAlbum }) {
+                                Icon(Icons.Filled.AddCircle, contentDescription = "Agregar a un álbum")
+                            }
+                            if (currentAlbum != null) {
+                                IconButton(onClick = viewModel::removeSelectedFromAlbum) {
+                                    Icon(Icons.Filled.Clear, contentDescription = "Quitar del álbum")
+                                }
+                            }
+                            IconButton(onClick = { dialog = Dialog.DeletePhotos }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Borrar de Fototin")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        ),
+                    )
+                }
+            },
+            floatingActionButton = {
+                AnimatedVisibility(visible = !selecting, enter = scaleIn(), exit = scaleOut()) {
+                    ExtendedFloatingActionButton(
+                        onClick = onPickPhotos,
+                        expanded = atTop || visible.isEmpty(),
+                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        text = { Text(if (currentAlbum != null) "Agregar al álbum" else "Agregar fotos") },
+                    )
+                }
+            },
+        ) { padding ->
+            LazyVerticalStaggeredGrid(
+                state = gridState,
+                columns = StaggeredGridCells.Adaptive(108.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = padding.calculateTopPadding() + 8.dp,
+                    bottom = padding.calculateBottomPadding() + 96.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalItemSpacing = 8.dp,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (!selecting) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        Header(
+                            stack = memories.ifEmpty { photos.asReversed() },
+                            memoriesCount = memories.size,
+                            onAddWidget = onAddWidget,
+                        )
+                    }
+                    if (widgets.isNotEmpty()) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
+                            WidgetsRow(widgets, onNext = viewModel::advanceWidget, onEdit = { onEditWidget(it.appWidgetId) })
                         }
-                        IconButton(onClick = { dialog = Dialog.DeletePhotos }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Borrar de Fototin")
+                    }
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        SettingsCard(interval, shuffle, viewModel::setInterval, viewModel::setShuffle)
+                    }
+                }
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    AlbumRow(
+                        albums = albums,
+                        allCount = photos.size,
+                        current = currentAlbum,
+                        onOpen = viewModel::openAlbum,
+                        onNew = { dialog = Dialog.NewAlbum },
+                    )
+                }
+                importing?.let { progress ->
+                    item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress) }
+                }
+                if (!selecting) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        SectionTitle(
+                            album = currentAlbum,
+                            count = visible.size,
+                            sortByTaken = sortByTaken,
+                            onSort = viewModel::setSortByTaken,
+                            onRename = { a -> dialog = Dialog.RenameAlbum(a) },
+                            onDelete = { a -> dialog = Dialog.DeleteAlbum(a) },
+                        )
+                    }
+                }
+                if (visible.isEmpty() && importing == null) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        if (currentAlbum == null) EmptyState() else EmptyAlbum()
+                    }
+                }
+                // Ordenadas por fecha de la foto, con un separador por año.
+                val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
+                groups.forEach { (year, group) ->
+                    if (year != null) {
+                        item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
+                            Text(
+                                year.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                            )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    ),
-                )
+                    }
+                    items(group, key = { it.id }) { photo ->
+                        PhotoTile(
+                            photo = photo,
+                            selected = photo.id in selection,
+                            selecting = selecting,
+                            onOpen = { viewModel.openPhoto(photo.id) },
+                            onToggle = { viewModel.toggleSelection(photo.id) },
+                        )
+                    }
+                }
             }
-        },
-        floatingActionButton = {
-            AnimatedVisibility(visible = !selecting, enter = scaleIn(), exit = scaleOut()) {
-                ExtendedFloatingActionButton(
-                    onClick = onPickPhotos,
-                    expanded = atTop || visible.isEmpty(),
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text(if (currentAlbum != null) "Agregar al álbum" else "Agregar fotos") },
-                )
-            }
-        },
-    ) { padding ->
-        LazyVerticalStaggeredGrid(
-            state = gridState,
-            columns = StaggeredGridCells.Adaptive(108.dp),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 96.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalItemSpacing = 8.dp,
-            modifier = Modifier.fillMaxSize(),
+        }
+
+        AnimatedVisibility(
+            visible = openPhoto != null,
+            enter = slideInVertically { it / 3 } + fadeIn(),
+            exit = slideOutVertically { it / 3 } + fadeOut(),
         ) {
-            if (!selecting) {
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    Header(
-                        stack = memories.ifEmpty { photos.asReversed() },
-                        memoriesCount = memories.size,
-                        onAddWidget = onAddWidget,
-                    )
-                }
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    SettingsCard(interval, shuffle, viewModel::setInterval, viewModel::setShuffle)
-                }
-            }
-            item(span = StaggeredGridItemSpan.FullLine) {
-                AlbumRow(
-                    albums = albums,
-                    allCount = photos.size,
-                    current = currentAlbum,
-                    onOpen = viewModel::openAlbum,
-                    onNew = { dialog = Dialog.NewAlbum },
-                )
-            }
-            importing?.let { progress ->
-                item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress) }
-            }
-            if (!selecting) {
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    SectionTitle(
-                        album = currentAlbum,
-                        count = visible.size,
-                        onRename = { a -> dialog = Dialog.RenameAlbum(a) },
-                        onDelete = { a -> dialog = Dialog.DeleteAlbum(a) },
-                    )
-                }
-            }
-            if (visible.isEmpty() && importing == null) {
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    if (currentAlbum == null) EmptyState() else EmptyAlbum()
-                }
-            }
-            items(visible, key = { it.id }) { photo ->
-                PhotoTile(
+            // Mantener la última foto mientras se anima la salida.
+            var shown by remember { mutableStateOf(openPhoto) }
+            openPhoto?.let { shown = it }
+            shown?.let { photo ->
+                PhotoDetailScreen(
                     photo = photo,
-                    selected = photo.id in selection,
-                    selecting = selecting,
-                    onToggle = { viewModel.toggleSelection(photo.id) },
+                    albums = albums,
+                    onClose = { viewModel.openPhoto(null) },
+                    onNote = { viewModel.setNote(photo.id, it) },
+                    onFavorite = { viewModel.toggleFavorite(photo) },
+                    onFocus = { x, y -> viewModel.setFocus(photo.id, x, y) },
+                    onToggleAlbum = { viewModel.toggleAlbum(photo.id, it) },
+                    onDelete = { viewModel.deletePhoto(photo.id) },
                 )
             }
         }
@@ -376,12 +446,20 @@ private fun AlbumRow(
 }
 
 @Composable
-private fun SectionTitle(album: Album?, count: Int, onRename: (Album) -> Unit, onDelete: (Album) -> Unit) {
-    Row(Modifier.padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun SectionTitle(
+    album: Album?,
+    count: Int,
+    sortByTaken: Boolean,
+    onSort: (Boolean) -> Unit,
+    onRename: (Album) -> Unit,
+    onDelete: (Album) -> Unit,
+) {
+    Column(Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(album?.name ?: "Tus fotos", style = MaterialTheme.typography.titleLarge)
             Text(
-                "$count fotos · mantené presionada una para seleccionar",
+                "$count fotos · tocá una para editarla, mantené presionado para elegir varias",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -412,6 +490,11 @@ private fun SectionTitle(album: Album?, count: Int, onRename: (Album) -> Unit, o
                 }
             }
         }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+        FilterChip(selected = !sortByTaken, onClick = { onSort(false) }, label = { Text("Agregadas") })
+        FilterChip(selected = sortByTaken, onClick = { onSort(true) }, label = { Text("Por fecha de la foto") })
+    }
     }
 }
 
@@ -612,7 +695,8 @@ private fun EmptyState() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onToggle: () -> Unit) {
+private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onOpen: () -> Unit, onToggle: () -> Unit) {
+    val haptics = LocalHapticFeedback.current
     val inset by animateDpAsState(if (selected) 8.dp else 0.dp, label = "inset")
     val corner by animateDpAsState(if (selected) 20.dp else 14.dp, label = "corner")
     Box(
@@ -620,8 +704,11 @@ private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onTog
             .fillMaxWidth()
             .aspectRatio(photo.aspectRatio.coerceIn(0.6f, 1.7f))
             .combinedClickable(
-                onClick = { if (selecting) onToggle() },
-                onLongClick = onToggle,
+                onClick = { if (selecting) onToggle() else onOpen() },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onToggle()
+                },
             ),
     ) {
         AsyncImage(
@@ -634,6 +721,14 @@ private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onTog
                 .clip(RoundedCornerShape(corner))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
+        if (photo.favorite && !selecting) {
+            Icon(
+                Icons.Filled.Favorite,
+                contentDescription = "Favorita",
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(18.dp),
+            )
+        }
         if (selecting) {
             val check = Modifier.align(Alignment.TopStart).padding(8.dp).size(24.dp)
             if (selected) {
@@ -646,6 +741,45 @@ private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onTog
         }
     }
 }
+
+@Composable
+private fun WidgetsRow(widgets: List<PlacedWidget>, onNext: (PlacedWidget) -> Unit, onEdit: (PlacedWidget) -> Unit) {
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("Tus widgets", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            rowItems(widgets, key = { it.appWidgetId }) { widget ->
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    modifier = Modifier.width(if (widget.collage) 232.dp else 168.dp),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Box(
+                            Modifier.fillMaxWidth().height(132.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val preview = widget.preview
+                            if (preview != null) {
+                                Image(preview.asImageBitmap(), contentDescription = widget.description, modifier = Modifier.fillMaxSize())
+                            } else {
+                                Text("Sin fotos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(widget.description, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Row {
+                            TextButton(onClick = { onNext(widget) }) { Text("Cambiar") }
+                            TextButton(onClick = { onEdit(widget) }) { Text("Editar") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun yearOf(millis: Long): Int = Calendar.getInstance().apply { timeInMillis = millis }.get(Calendar.YEAR)
 
 private fun intervalLabel(minutes: Int): String = when {
     minutes == 0 -> "Al tocar"

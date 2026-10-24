@@ -22,6 +22,13 @@ Abrilo desde el teléfono para instalar o actualizar. Requiere Android 9 o super
 - **Álbumes:** agrupá fotos (Vacaciones, Familia…) y elegí qué álbum muestra cada widget.
 - **Recuerdos:** un widget puede mostrar fotos de un día como hoy en otros años, con la
   leyenda "Hace N años". Si ese día no hay, usa la misma semana o el mismo mes.
+- **Detalle de cada foto:** tocá una foto para escribirle una nota (aparece en el widget),
+  marcarla como favorita, elegir qué parte se ve al recortarla y sumarla a álbumes.
+- **Favoritas:** un widget puede mostrar solo tus fotos favoritas.
+- **Tus widgets en la app:** cada widget puesto aparece con su foto actual, para cambiarla o
+  editarlo sin ir a la pantalla de inicio.
+- **Orden:** por fecha en que se agregaron o por fecha de la foto, separadas por año.
+- **Sin repetidas:** al importar se reconocen las fotos que ya estaban.
 - **Administrar fotos:** mantené presionada una foto para seleccionar varias y sumarlas a un
   álbum, sacarlas de él o borrarlas de Fototin (las originales no se tocan).
 

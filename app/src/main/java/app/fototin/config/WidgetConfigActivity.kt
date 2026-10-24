@@ -246,9 +246,9 @@ class WidgetConfigActivity : ComponentActivity() {
                                 modifier = Modifier.padding(horizontal = 20.dp),
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text("Mostrar la fecha", style = MaterialTheme.typography.bodyLarge)
+                                    Text("Mostrar nota o fecha", style = MaterialTheme.typography.bodyLarge)
                                     Text(
-                                        "El día en que se sacó cada foto",
+                                        "La nota que le escribiste a la foto o, si no tiene, el día en que se sacó",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -324,7 +324,11 @@ class WidgetConfigActivity : ComponentActivity() {
 
     @Composable
     private fun SourcePicker(albums: List<Album>, selected: WidgetSource, onSelect: (WidgetSource) -> Unit) {
-        val options = listOf(WidgetSource.All to "Todas", WidgetSource.Memories to "Recuerdos") +
+        val options = listOf(
+            WidgetSource.All to "Todas",
+            WidgetSource.Memories to "Recuerdos",
+            WidgetSource.Favorites to "Favoritas",
+        ) +
             albums.map { WidgetSource.FromAlbum(it.id) to it.name }
         Column {
             LazyRow(

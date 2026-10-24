@@ -6,14 +6,19 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.fototin.data.Album
 import app.fototin.data.AlbumRepository
+import app.fototin.data.ImportResult
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.data.Settings
+import app.fototin.widget.PlacedWidget
 import app.fototin.widget.RotationScheduler
 import app.fototin.widget.WidgetSupport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,15 +50,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         albums.firstOrNull { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** Fotos del álbum actual (o todas), las más nuevas primero. */
-    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum) { photos, album ->
-        if (album == null) {
-            photos.asReversed()
+    private val _sortByTaken = MutableStateFlow(settings.sortByTaken)
+    val sortByTaken: StateFlow<Boolean> = _sortByTaken.asStateFlow()
+
+    /** Fotos del álbum actual (o todas): las más nuevas primero, por fecha de la foto o de agregada. */
+    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum, _sortByTaken) { photos, album, byTaken ->
+        val inView = if (album == null) {
+            photos
         } else {
             val byId = photos.associateBy { it.id }
-            album.photoIds.mapNotNull { byId[it] }.asReversed()
+            album.photoIds.mapNotNull { byId[it] }
         }
+        if (byTaken) inView.sortedByDescending { it.takenAt } else inView.asReversed()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Foto abierta en la pantalla de detalle. */
+    private val _openPhotoId = MutableStateFlow<String?>(null)
+    val openPhoto: StateFlow<Photo?> = combine(_photos, _openPhotoId) { photos, id ->
+        photos.firstOrNull { it.id == id }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _widgets = MutableStateFlow<List<PlacedWidget>>(emptyList())
+    val widgets: StateFlow<List<PlacedWidget>> = _widgets.asStateFlow()
+
+    /** Mensajes cortos para mostrar abajo de la pantalla. */
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     /** Fotos de un día como hoy en otros años. */
     val memoriesToday: StateFlow<List<Photo>> = _photos.map { PhotoPool.exactMemories(it) }
@@ -85,10 +107,60 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val albumId = _currentAlbumId.value
         viewModelScope.launch {
             _importing.value = ImportProgress(0, uris.size)
-            val ids = repository.import(uris) { done, total -> _importing.value = ImportProgress(done, total) }
-            if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, ids) }
+            val result = repository.import(uris) { done, total -> _importing.value = ImportProgress(done, total) }
+            if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, result.ids) }
             _importing.value = null
             refresh()
+            _messages.tryEmit(importMessage(result))
+        }
+    }
+
+    fun openPhoto(id: String?) {
+        _openPhotoId.value = id
+    }
+
+    fun setNote(id: String, note: String) = updatePhoto { repository.update(id, note = note) }
+
+    fun toggleFavorite(photo: Photo) = updatePhoto { repository.update(photo.id, favorite = !photo.favorite) }
+
+    fun setFocus(id: String, x: Float, y: Float) = updatePhoto { repository.update(id, focus = x to y) }
+
+    fun toggleAlbum(photoId: String, album: Album) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (photoId in album.photoIds) {
+                    albumRepository.remove(album.id, listOf(photoId))
+                } else {
+                    albumRepository.add(album.id, listOf(photoId))
+                }
+            }
+            refresh()
+        }
+    }
+
+    fun deletePhoto(id: String) {
+        _openPhotoId.value = null
+        viewModelScope.launch {
+            repository.remove(listOf(id))
+            refresh()
+            _messages.tryEmit("Foto borrada de Fototin")
+        }
+    }
+
+    fun setSortByTaken(enabled: Boolean) {
+        settings.sortByTaken = enabled
+        _sortByTaken.value = enabled
+    }
+
+    /** Vuelve a leer los widgets puestos, por ejemplo al volver a la app. */
+    fun refreshWidgets() {
+        viewModelScope.launch { _widgets.value = WidgetSupport.placedWidgets(getApplication()) }
+    }
+
+    fun advanceWidget(widget: PlacedWidget) {
+        viewModelScope.launch {
+            WidgetSupport.advance(getApplication(), widget)
+            refreshWidgets()
         }
     }
 
@@ -104,15 +176,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Borra las fotos seleccionadas de Fototin (las originales no se tocan). */
-    fun deleteSelected() = withSelection { ids -> repository.remove(ids) }
+    fun deleteSelected() {
+        val count = _selection.value.size
+        withSelection { ids -> repository.remove(ids) }
+        if (count > 0) _messages.tryEmit(if (count == 1) "Foto borrada de Fototin" else "$count fotos borradas de Fototin")
+    }
 
     fun removeSelectedFromAlbum() {
         val albumId = _currentAlbumId.value ?: return
         withSelection { ids -> withContext(Dispatchers.IO) { albumRepository.remove(albumId, ids) } }
     }
 
-    fun addSelectedToAlbum(albumId: String) =
+    fun addSelectedToAlbum(albumId: String) {
+        val name = _albums.value.firstOrNull { it.id == albumId }?.name
         withSelection { ids -> withContext(Dispatchers.IO) { albumRepository.add(albumId, ids) } }
+        name?.let { _messages.tryEmit("Agregadas a «$it»") }
+    }
 
     /** Crea un álbum con las fotos seleccionadas (si hay) y lo abre. */
     fun createAlbum(name: String) {
@@ -153,6 +232,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _shuffle.value = enabled
     }
 
+    private fun updatePhoto(action: suspend () -> Unit) {
+        viewModelScope.launch {
+            action()
+            refresh()
+        }
+    }
+
+    private fun importMessage(result: ImportResult): String {
+        val added = result.ids.size
+        val parts = buildList {
+            add(
+                when (added) {
+                    0 -> "No se agregaron fotos"
+                    1 -> "Se agregó 1 foto"
+                    else -> "Se agregaron $added fotos"
+                },
+            )
+            if (result.duplicates > 0) add(if (result.duplicates == 1) "1 ya estaba" else "${result.duplicates} ya estaban")
+            if (result.failed > 0) add(if (result.failed == 1) "1 no se pudo abrir" else "${result.failed} no se pudieron abrir")
+        }
+        return parts.joinToString(" · ")
+    }
+
     private fun withSelection(action: suspend (Set<String>) -> Unit) {
         val ids = _selection.value
         if (ids.isEmpty()) return
@@ -171,5 +273,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun refresh() {
         reload()
         WidgetSupport.updateAll(getApplication())
+        _widgets.value = WidgetSupport.placedWidgets(getApplication())
     }
 }
