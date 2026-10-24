@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private fun requestPinWidget() {
         val manager = AppWidgetManager.getInstance(this)
         if (manager.isRequestPinAppWidgetSupported) {
+            // El launcher muestra su diálogo y luego abre la configuración del estilo.
             manager.requestPinAppWidget(ComponentName(this, FotoWidgetReceiver::class.java), null, null)
         } else {
             Toast.makeText(
@@ -78,6 +79,6 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val MAX_PICK = 50
+        private const val MAX_PICK = 100
     }
 }

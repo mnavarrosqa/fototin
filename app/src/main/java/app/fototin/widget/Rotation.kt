@@ -14,20 +14,29 @@ import androidx.work.WorkerParameters
 import app.fototin.data.PhotoRepository
 import app.fototin.data.Settings
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
 
-/** Pasa el widget [glanceId] a la siguiente foto (o a una al azar). */
+/**
+ * Pasa el widget [glanceId] a la siguiente foto.
+ *
+ * En orden aleatorio no repite ninguna foto hasta haber mostrado todas: el widget recuerda cuáles
+ * ya vio y empieza una ronda nueva cuando se terminan.
+ */
 suspend fun advancePhoto(context: Context, glanceId: GlanceId) {
-    val count = PhotoRepository(context).list().size
-    if (count == 0) return
+    val ids = PhotoRepository(context).list().map { it.id }
+    if (ids.isEmpty()) return
     val shuffle = Settings(context).shuffle
     updateAppWidgetState(context, glanceId) { prefs ->
-        val current = (prefs[FotoWidget.KEY_INDEX] ?: 0).mod(count)
-        prefs[FotoWidget.KEY_INDEX] = when {
-            count == 1 -> 0
-            // Elegir entre las demás fotos para que nunca repita la actual.
-            shuffle -> (current + 1 + Random.nextInt(count - 1)) % count
-            else -> (current + 1) % count
+        val current = prefs[FotoWidget.KEY_PHOTO_ID]?.takeIf { it in ids } ?: ids.first()
+        prefs[FotoWidget.KEY_PHOTO_ID] = if (shuffle && ids.size > 1) {
+            var seen = prefs[FotoWidget.KEY_SEEN].orEmpty().intersect(ids.toSet()) + current
+            var pool = ids.filter { it !in seen }
+            if (pool.isEmpty()) {
+                seen = setOf(current)
+                pool = ids - current
+            }
+            pool.random().also { prefs[FotoWidget.KEY_SEEN] = seen + it }
+        } else {
+            ids[(ids.indexOf(current) + 1) % ids.size]
         }
     }
     FotoWidget().update(context, glanceId)
