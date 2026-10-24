@@ -13,6 +13,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
+import app.fototin.config.WidgetConfigActivity
 import app.fototin.widget.CollageWidgetReceiver
 import app.fototin.widget.FotoWidgetReceiver
 import app.fototin.widget.RotationScheduler
@@ -43,9 +44,21 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onAddWidget = ::requestPinWidget,
+                    onEditWidget = { id ->
+                        startActivity(
+                            Intent(this@MainActivity, WidgetConfigActivity::class.java)
+                                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
+                        )
+                    },
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Al volver (por ejemplo, después de agregar o editar un widget), mostrar los widgets al día.
+        viewModel.refreshWidgets()
     }
 
     override fun onNewIntent(intent: Intent) {

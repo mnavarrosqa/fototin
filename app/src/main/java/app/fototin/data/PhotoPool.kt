@@ -19,6 +19,10 @@ sealed interface WidgetSource {
         override val key = "memories"
     }
 
+    data object Favorites : WidgetSource {
+        override val key = "favorites"
+    }
+
     data class FromAlbum(val albumId: String) : WidgetSource {
         override val key = "album:$albumId"
     }
@@ -26,6 +30,7 @@ sealed interface WidgetSource {
     companion object {
         fun from(key: String?): WidgetSource = when {
             key == Memories.key -> Memories
+            key == Favorites.key -> Favorites
             key != null && key.startsWith("album:") -> FromAlbum(key.removePrefix("album:"))
             else -> All
         }
@@ -40,6 +45,8 @@ object PhotoPool {
         return when (source) {
             WidgetSource.All -> photos
             WidgetSource.Memories -> memories(photos, now)
+            // Sin favoritas todavía, mostrar todas antes que dejar el widget vacío.
+            WidgetSource.Favorites -> photos.filter { it.favorite }.ifEmpty { photos }
             is WidgetSource.FromAlbum -> {
                 val album = AlbumRepository(context).get(source.albumId) ?: return photos
                 val byId = photos.associateBy { it.id }
@@ -72,7 +79,11 @@ object PhotoPool {
         }
     }
 
-    fun caption(photo: Photo, source: WidgetSource, showDate: Boolean, now: Long = System.currentTimeMillis()): String? {
+    /**
+     * Texto que acompaña la foto en el widget. En Recuerdos, cuántos años pasaron; si no, con
+     * [showText] activado, la nota de la foto o, si no tiene, la fecha.
+     */
+    fun caption(photo: Photo, source: WidgetSource, showText: Boolean, now: Long = System.currentTimeMillis()): String? {
         if (source == WidgetSource.Memories) {
             val years = calendar(now).get(Calendar.YEAR) - calendar(photo.takenAt).get(Calendar.YEAR)
             return when {
@@ -81,7 +92,8 @@ object PhotoPool {
                 else -> formatDate(photo.takenAt)
             }
         }
-        return if (showDate) formatDate(photo.takenAt) else null
+        if (!showText) return null
+        return photo.note.ifBlank { formatDate(photo.takenAt) }
     }
 
     fun formatDate(millis: Long): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis))

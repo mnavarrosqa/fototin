@@ -86,7 +86,7 @@ class PhotoViewerActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                 )
                 Text(
-                    PhotoPool.caption(photo, source, showDate = true) ?: "",
+                    PhotoPool.caption(photo, source, showText = true) ?: "",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier
