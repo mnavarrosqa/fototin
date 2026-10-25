@@ -79,7 +79,8 @@ class FotoWidget : GlanceAppWidget() {
         val context = LocalContext.current
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
-        val bitmap = remember(photo.id, style, caption, size) {
+        // La clave incluye la foto entera: si cambia su encuadre, hay que redibujar.
+        val bitmap = remember(photo, style, caption, size) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
             WidgetSupport.load(photo, maxOf(w, h))?.let { source ->

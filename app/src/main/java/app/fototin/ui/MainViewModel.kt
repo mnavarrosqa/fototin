@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.fototin.data.Album
 import app.fototin.data.AlbumRepository
+import app.fototin.data.BackupManager
 import app.fototin.data.ImportResult
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
@@ -72,6 +73,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _widgets = MutableStateFlow<List<PlacedWidget>>(emptyList())
     val widgets: StateFlow<List<PlacedWidget>> = _widgets.asStateFlow()
+
+    private val _backupBusy = MutableStateFlow(false)
+    val backupBusy: StateFlow<Boolean> = _backupBusy.asStateFlow()
 
     /** Mensajes cortos para mostrar abajo de la pantalla. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -144,6 +148,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repository.remove(listOf(id))
             refresh()
             _messages.tryEmit("Foto borrada de Fototin")
+        }
+    }
+
+    fun backup(uri: Uri) = runBackup {
+        val count = BackupManager(getApplication()).export(uri)
+        "Copia guardada con $count fotos"
+    }
+
+    fun restore(uri: Uri) = runBackup {
+        val added = BackupManager(getApplication()).restore(uri)
+        refresh()
+        when (added) {
+            0 -> "La copia no tenía fotos nuevas"
+            1 -> "Se restauró 1 foto"
+            else -> "Se restauraron $added fotos"
+        }
+    }
+
+    private fun runBackup(action: suspend () -> String) {
+        if (_backupBusy.value) return
+        _backupBusy.value = true
+        viewModelScope.launch {
+            val message = runCatching { action() }.getOrElse { "No se pudo completar: ${it.message ?: "error desconocido"}" }
+            _backupBusy.value = false
+            _messages.tryEmit(message)
         }
     }
 

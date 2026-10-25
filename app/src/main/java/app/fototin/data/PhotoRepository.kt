@@ -61,11 +61,27 @@ class PhotoRepository(context: Context) {
     private val thumbsDir = File(appContext.filesDir, "thumbs").apply { mkdirs() }
     private val indexFile = File(appContext.filesDir, "photos.json")
 
-    /** Fotos en el orden en que se importaron. */
+    /**
+     * Fotos en el orden en que se importaron.
+     *
+     * Se llama muy seguido (cada vez que se dibuja un widget), así que se sirve desde memoria: el
+     * índice se lee del disco una sola vez por proceso y se actualiza en cada escritura.
+     */
     fun list(): List<Photo> = synchronized(lock) {
+        if (!reconciled) {
+            reconcile()
+            reconciled = true
+        }
+        cachedPhotos ?: readIndex().map { it.toPhoto() }.also { cachedPhotos = it }
+    }
+
+    /**
+     * Acomoda el índice con los archivos reales: suma fotos de versiones anteriores que no tenían
+     * índice y quita las que ya no existen.
+     */
+    private fun reconcile() {
         val entries = readIndex()
         val known = entries.mapTo(HashSet()) { it.id }
-        // Fotos importadas por versiones anteriores, que no tenían índice.
         val orphans = photosDir.listFiles { f -> f.extension == "jpg" && f.nameWithoutExtension !in known }
             ?.sortedBy { it.name }
             .orEmpty()
@@ -76,8 +92,31 @@ class PhotoRepository(context: Context) {
             }
         val all = (entries + orphans).filter { photoFile(it.id).exists() }
         if (orphans.isNotEmpty() || all.size != entries.size) writeIndex(all)
-        all.map { it.toPhoto() }
     }
+
+    /** El índice tal como está en el disco, para copias de seguridad. */
+    fun exportIndexJson(): String = synchronized(lock) { toJson(readIndex()) }
+
+    /**
+     * Fotos de una copia de seguridad que conviene restaurar: las que no están ya (ni con el mismo
+     * id ni con el mismo archivo original).
+     */
+    fun restorableIds(json: String): Set<String> = synchronized(lock) {
+        val current = readIndex()
+        val ids = current.mapTo(HashSet()) { it.id }
+        val hashes = current.mapNotNullTo(HashSet()) { it.hash }
+        parseEntries(json).filter { it.id !in ids && (it.hash == null || it.hash !in hashes) }.mapTo(HashSet()) { it.id }
+    }
+
+    /** Suma al índice las fotos restauradas, cuyos archivos ya se copiaron. Devuelve cuántas. */
+    fun addRestored(json: String, ids: Set<String>): Int = synchronized(lock) {
+        val incoming = parseEntries(json).filter { it.id in ids && photoFile(it.id).exists() }
+        if (incoming.isNotEmpty()) writeIndex(readIndex() + incoming)
+        incoming.size
+    }
+
+    /** Archivo donde se guarda (o se restaura) una foto o su miniatura. */
+    fun fileFor(id: String, thumbnail: Boolean): File = if (thumbnail) thumbFile(id) else photoFile(id)
 
     /**
      * Importa las fotos de a varias a la vez. Las que ya estaban (mismo archivo original) se
@@ -253,9 +292,14 @@ class PhotoRepository(context: Context) {
     )
 
     private fun readIndex(): List<Entry> {
+        cachedEntries?.let { return it }
         if (!indexFile.exists()) return emptyList()
-        return runCatching {
-            val array = JSONArray(indexFile.readText())
+        return parseEntries(runCatching { indexFile.readText() }.getOrDefault("[]")).also { cachedEntries = it }
+    }
+
+    private fun parseEntries(json: String): List<Entry> =
+        runCatching {
+            val array = JSONArray(json)
             (0 until array.length()).map { i ->
                 val o = array.getJSONObject(i)
                 Entry(
@@ -267,9 +311,17 @@ class PhotoRepository(context: Context) {
                 )
             }
         }.getOrDefault(emptyList())
-    }
 
     private fun writeIndex(entries: List<Entry>) {
+        // Escribir y renombrar para no dejar un índice a medias si la app se cierra.
+        val tmp = File(indexFile.path + ".tmp")
+        tmp.writeText(toJson(entries))
+        tmp.renameTo(indexFile)
+        cachedEntries = entries
+        cachedPhotos = null
+    }
+
+    private fun toJson(entries: List<Entry>): String {
         val array = JSONArray()
         entries.forEach {
             array.put(
@@ -278,10 +330,7 @@ class PhotoRepository(context: Context) {
                     .put("n", it.note).put("fav", it.favorite).put("hash", it.hash ?: ""),
             )
         }
-        // Escribir y renombrar para no dejar un índice a medias si la app se cierra.
-        val tmp = File(indexFile.path + ".tmp")
-        tmp.writeText(array.toString())
-        tmp.renameTo(indexFile)
+        return array.toString()
     }
 
     /** Un foco negativo significa "todavía no calculado". */
@@ -302,8 +351,11 @@ class PhotoRepository(context: Context) {
         private const val THUMB_PX = 360
         private const val IMPORT_PARALLELISM = 3
 
-        /** Protege `photos.json`: lo leen y escriben la app, el widget y el worker. */
+        /** Protege `photos.json` y su copia en memoria: los usan la app, los widgets y el worker. */
         private val lock = Any()
+        private var cachedEntries: List<Entry>? = null
+        private var cachedPhotos: List<Photo>? = null
+        private var reconciled = false
 
         /** Decodifica [file] con una resolución cercana a [targetPx] en su lado más largo. */
         fun decodeForSize(file: File, targetPx: Int): Bitmap? {

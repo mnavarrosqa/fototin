@@ -29,6 +29,8 @@ Abrilo desde el teléfono para instalar o actualizar. Requiere Android 9 o super
   editarlo sin ir a la pantalla de inicio.
 - **Orden:** por fecha en que se agregaron o por fecha de la foto, separadas por año.
 - **Sin repetidas:** al importar se reconocen las fotos que ya estaban.
+- **Copia de seguridad:** guardá todas las fotos, notas y álbumes en un .zip y restauralas en
+  otro teléfono o después de reinstalar (se suman a lo que ya hay, sin repetir).
 - **Administrar fotos:** mantené presionada una foto para seleccionar varias y sumarlas a un
   álbum, sacarlas de él o borrarlas de Fototin (las originales no se tocan).
 
@@ -49,6 +51,15 @@ Google Fotos con la Library API. Por eso Fototin usa el selector del sistema y "
 que funcionan sin claves ni cuentas. Una opción a futuro es la
 [Google Photos Picker API](https://developers.google.com/photos/picker), que requiere un
 proyecto en Google Cloud y OAuth.
+
+## Tests
+
+```sh
+./gradlew testReleaseUnitTest
+```
+
+Cubren la lógica sin Android: rotación sin repetir, selección del collage, recuerdos y
+leyendas. GitHub Actions los corre antes de cada build.
 
 ## Compilar
 

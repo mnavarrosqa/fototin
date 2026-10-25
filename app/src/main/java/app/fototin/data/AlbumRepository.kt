@@ -41,19 +41,49 @@ class AlbumRepository(context: Context) {
         write(read().map { if (it.id == id) change(it) else it })
     }
 
+    /** Los álbumes tal como están guardados, para copias de seguridad. */
+    fun exportJson(): String = synchronized(lock) { toJson(read()) }
+
+    /**
+     * Suma los álbumes de una copia de seguridad. Si un álbum ya existe, se le agregan las fotos
+     * que le falten.
+     */
+    fun mergeBackup(json: String) = synchronized(lock) {
+        val incoming = parse(json)
+        val current = read()
+        val merged = current.map { album ->
+            incoming.firstOrNull { it.id == album.id }
+                ?.let { album.copy(photoIds = (album.photoIds + it.photoIds).distinct()) }
+                ?: album
+        } + incoming.filter { new -> current.none { it.id == new.id } }
+        write(merged)
+    }
+
+    // Se sirve desde memoria: el archivo se lee una sola vez por proceso.
     private fun read(): List<Album> {
+        cached?.let { return it }
         if (!file.exists()) return emptyList()
-        return runCatching {
-            val array = JSONArray(file.readText())
+        return parse(runCatching { file.readText() }.getOrDefault("[]")).also { cached = it }
+    }
+
+    private fun parse(json: String): List<Album> =
+        runCatching {
+            val array = JSONArray(json)
             (0 until array.length()).map { i ->
                 val o = array.getJSONObject(i)
                 val ids = o.getJSONArray("photos")
                 Album(o.getString("id"), o.getString("name"), (0 until ids.length()).map { ids.getString(it) })
             }
         }.getOrDefault(emptyList())
-    }
 
     private fun write(albums: List<Album>) {
+        val tmp = File(file.path + ".tmp")
+        tmp.writeText(toJson(albums))
+        tmp.renameTo(file)
+        cached = albums
+    }
+
+    private fun toJson(albums: List<Album>): String {
         val array = JSONArray()
         albums.forEach { album ->
             array.put(
@@ -63,12 +93,11 @@ class AlbumRepository(context: Context) {
                     .put("photos", JSONArray(album.photoIds)),
             )
         }
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(array.toString())
-        tmp.renameTo(file)
+        return array.toString()
     }
 
     private companion object {
         val lock = Any()
+        var cached: List<Album>? = null
     }
 }
