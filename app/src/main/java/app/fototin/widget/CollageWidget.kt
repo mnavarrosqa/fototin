@@ -22,6 +22,7 @@ import androidx.glance.layout.fillMaxSize
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import app.fototin.data.WidgetSource
+import app.fototin.data.collageSelection
 
 /** Widget con 2 a 4 fotos a la vez. Al tocarlo cambian todas. */
 class CollageWidget : GlanceAppWidget() {
@@ -36,7 +37,7 @@ class CollageWidget : GlanceAppWidget() {
             if (pool.isEmpty()) {
                 EmptyWidget(if (source is WidgetSource.FromAlbum) "Este álbum está vacío" else "Elegí tus fotos")
             } else {
-                Collage(current(pool, prefs[WidgetKeys.PHOTO_IDS], prefs[WidgetKeys.COUNT] ?: DEFAULT_COUNT))
+                Collage(collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], prefs[WidgetKeys.COUNT] ?: DEFAULT_COUNT))
             }
         }
     }
@@ -46,7 +47,8 @@ class CollageWidget : GlanceAppWidget() {
         val context = LocalContext.current
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
-        val bitmap = remember(photos.map { it.id }, size) {
+        // La clave incluye la foto entera: si cambia su encuadre, hay que redibujar.
+        val bitmap = remember(photos, size) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
             val sources = photos.mapNotNull { WidgetSupport.load(it, maxOf(w, h) / 2 + 1) }
@@ -66,13 +68,6 @@ class CollageWidget : GlanceAppWidget() {
     companion object {
         const val DEFAULT_COUNT = 3
         val COUNT_OPTIONS = listOf(2, 3, 4)
-
-        /** Las fotos guardadas que siguen disponibles, completadas con otras si faltan. */
-        fun current(pool: List<Photo>, savedIds: String?, count: Int): List<Photo> {
-            val byId = pool.associateBy { it.id }
-            val saved = savedIds?.split(',')?.mapNotNull { byId[it] }.orEmpty().distinct()
-            return (saved + pool.filter { it !in saved }).take(count.coerceIn(1, 4))
-        }
     }
 }
 

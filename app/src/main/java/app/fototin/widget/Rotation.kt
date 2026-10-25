@@ -16,42 +16,10 @@ import androidx.work.WorkerParameters
 import app.fototin.data.PhotoPool
 import app.fototin.data.Settings
 import app.fototin.data.WidgetSource
+import app.fototin.data.collageSelection
+import app.fototin.data.pickNext
+import java.util.Calendar
 import java.util.concurrent.TimeUnit
-
-/**
- * Elige las próximas [count] fotos entre [ids].
- *
- * En orden aleatorio no repite ninguna foto hasta haber mostrado todas: [seen] guarda las que ya
- * salieron en esta ronda y se reinicia cuando se terminan. Devuelve las fotos elegidas y el nuevo
- * [seen].
- */
-internal fun pickNext(
-    ids: List<String>,
-    current: List<String>,
-    seen: Set<String>,
-    count: Int,
-    shuffle: Boolean,
-): Pair<List<String>, Set<String>> {
-    val n = minOf(count, ids.size)
-    if (!shuffle || ids.size <= n) {
-        val start = current.lastOrNull()?.let { ids.indexOf(it) + 1 } ?: 0
-        return List(n) { ids[(start + it) % ids.size] } to emptySet()
-    }
-    var seenNow = seen.intersect(ids.toSet()) + current
-    val picked = mutableListOf<String>()
-    repeat(n) {
-        var pool = ids.filter { it !in seenNow && it !in picked }
-        if (pool.isEmpty()) {
-            seenNow = current.toSet() + picked
-            pool = ids.filter { it !in seenNow }
-        }
-        if (pool.isEmpty()) pool = ids.filter { it !in picked }
-        val next = pool.random()
-        picked += next
-        seenNow = seenNow + next
-    }
-    return picked to seenNow
-}
 
 /** Pasa el widget de una foto a la siguiente. */
 suspend fun advancePhoto(context: Context, glanceId: GlanceId) {
@@ -74,7 +42,7 @@ suspend fun advanceCollage(context: Context, glanceId: GlanceId) {
         val pool = PhotoPool.resolve(context, WidgetSource.from(prefs[WidgetKeys.SOURCE]))
         if (pool.isEmpty()) return@updateAppWidgetState
         val count = prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT
-        val current = CollageWidget.current(pool, prefs[WidgetKeys.PHOTO_IDS], count).map { it.id }
+        val current = collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], count).map { it.id }
         val (next, seen) = pickNext(pool.map { it.id }, current, prefs[WidgetKeys.SEEN].orEmpty(), count, shuffle)
         prefs[WidgetKeys.PHOTO_IDS] = next.joinToString(",")
         prefs[WidgetKeys.SEEN] = seen
@@ -103,10 +71,23 @@ class RotateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 }
 
+/**
+ * Redibuja los widgets una vez por día, pasada la medianoche. Así los Recuerdos cambian de día
+ * aunque la rotación automática esté apagada.
+ */
+class DailyRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        WidgetSupport.updateAll(applicationContext)
+        return Result.success()
+    }
+}
+
 object RotationScheduler {
     private const val WORK_NAME = "rotate_photos"
+    private const val DAILY_WORK_NAME = "daily_refresh"
 
     fun schedule(context: Context) {
+        scheduleDaily(context)
         val minutes = Settings(context).intervalMinutes
         if (minutes <= 0) {
             cancel(context)
@@ -121,11 +102,30 @@ object RotationScheduler {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
 
+    private fun scheduleDaily(context: Context) {
+        val now = Calendar.getInstance()
+        val next = (now.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 5)
+            set(Calendar.SECOND, 0)
+        }
+        val request = PeriodicWorkRequestBuilder<DailyRefreshWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(next.timeInMillis - now.timeInMillis, TimeUnit.MILLISECONDS)
+            .build()
+        // KEEP: si ya está programado, no correr la hora cada vez que se abre la app.
+        WorkManager.getInstance(context)
+            .enqueueUniquePeriodicWork(DAILY_WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
     /** Cancela la rotación si ya no queda ningún widget (de foto ni collage) en la pantalla. */
     fun cancelIfUnused(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val remaining = listOf(FotoWidgetReceiver::class.java, CollageWidgetReceiver::class.java)
             .sumOf { manager.getAppWidgetIds(ComponentName(context, it)).size }
-        if (remaining == 0) cancel(context)
+        if (remaining == 0) {
+            cancel(context)
+            WorkManager.getInstance(context).cancelUniqueWork(DAILY_WORK_NAME)
+        }
     }
 }

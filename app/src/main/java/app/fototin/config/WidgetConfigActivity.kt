@@ -61,6 +61,7 @@ import app.fototin.data.AlbumRepository
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import app.fototin.data.WidgetSource
+import app.fototin.data.collageSelection
 import app.fototin.ui.FototinTheme
 import app.fototin.widget.CollageWidget
 import app.fototin.widget.CollageWidgetReceiver
@@ -176,7 +177,7 @@ class WidgetConfigActivity : ComponentActivity() {
             value = withContext(Dispatchers.IO) {
                 val pool = PhotoPool.resolve(this@WidgetConfigActivity, source)
                 if (isCollage) {
-                    CollageWidget.current(pool, currentCollageIds, count)
+                    collageSelection(pool, currentCollageIds, count)
                 } else {
                     listOfNotNull(pool.firstOrNull { it.id == currentPhotoId } ?: pool.lastOrNull())
                 }

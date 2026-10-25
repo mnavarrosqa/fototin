@@ -16,6 +16,7 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import app.fototin.data.AlbumRepository
 import app.fototin.data.PhotoPool
 import app.fototin.data.WidgetSource
+import app.fototin.data.collageSelection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.fototin.data.Photo
@@ -84,7 +85,7 @@ object WidgetSupport {
                 val preview = if (pool.isEmpty()) {
                     null
                 } else if (collage) {
-                    val photos = CollageWidget.current(pool, prefs[WidgetKeys.PHOTO_IDS], prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT)
+                    val photos = collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT)
                     val sources = photos.mapNotNull { load(it, PREVIEW_PX / 2) }
                     PhotoStyler.renderCollage(sources, w, h, scale, launcherCornerDp(context, 20f))
                         .also { sources.forEach { s -> s.bitmap.recycle() } }

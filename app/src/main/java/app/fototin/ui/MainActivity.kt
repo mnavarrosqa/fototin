@@ -14,6 +14,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
 import app.fototin.config.WidgetConfigActivity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import app.fototin.widget.CollageWidgetReceiver
 import app.fototin.widget.FotoWidgetReceiver
 import app.fototin.widget.RotationScheduler
@@ -27,6 +30,14 @@ class MainActivity : ComponentActivity() {
     private val pickPhotos = registerForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(MAX_PICK),
     ) { uris -> viewModel.import(uris) }
+
+    private val createBackup = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri -> uri?.let(viewModel::backup) }
+
+    private val openBackup = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::restore) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +61,11 @@ class MainActivity : ComponentActivity() {
                                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
                         )
                     },
+                    onBackup = {
+                        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                        createBackup.launch("fototin-$date.zip")
+                    },
+                    onRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
                 )
             }
         }

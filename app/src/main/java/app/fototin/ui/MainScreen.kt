@@ -92,6 +92,7 @@ import app.fototin.widget.PlacedWidget
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
@@ -118,6 +119,8 @@ fun MainScreen(
     onPickPhotos: () -> Unit,
     onAddWidget: (collage: Boolean) -> Unit,
     onEditWidget: (appWidgetId: Int) -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
 ) {
     val photos by viewModel.photos.collectAsState()
     val visible by viewModel.visiblePhotos.collectAsState()
@@ -131,6 +134,7 @@ fun MainScreen(
     val sortByTaken by viewModel.sortByTaken.collectAsState()
     val widgets by viewModel.widgets.collectAsState()
     val openPhoto by viewModel.openPhoto.collectAsState()
+    val backupBusy by viewModel.backupBusy.collectAsState()
 
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -215,7 +219,15 @@ fun MainScreen(
                         }
                     }
                     item(span = StaggeredGridItemSpan.FullLine) {
-                        SettingsCard(interval, shuffle, viewModel::setInterval, viewModel::setShuffle)
+                        SettingsCard(
+                            interval = interval,
+                            shuffle = shuffle,
+                            backupBusy = backupBusy,
+                            onInterval = viewModel::setInterval,
+                            onShuffle = viewModel::setShuffle,
+                            onBackup = onBackup,
+                            onRestore = onRestore,
+                        )
                     }
                 }
                 item(span = StaggeredGridItemSpan.FullLine) {
@@ -609,8 +621,11 @@ private fun PolaroidStack(photos: List<Photo>) {
 private fun SettingsCard(
     interval: Int,
     shuffle: Boolean,
+    backupBusy: Boolean,
     onInterval: (Int) -> Unit,
     onShuffle: (Boolean) -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -648,6 +663,24 @@ private fun SettingsCard(
                     )
                 }
                 Switch(checked = shuffle, onCheckedChange = onShuffle)
+            }
+            HorizontalDivider(Modifier.padding(vertical = 12.dp, horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text("Copia de seguridad", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Fotos, notas y álbumes en un archivo, para cambiar de teléfono o reinstalar",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (backupBusy) {
+                    CircularProgressIndicator(Modifier.padding(horizontal = 16.dp).size(24.dp), strokeWidth = 3.dp)
+                }
+            }
+            Row(Modifier.padding(horizontal = 8.dp)) {
+                TextButton(onClick = onBackup, enabled = !backupBusy) { Text("Guardar copia") }
+                TextButton(onClick = onRestore, enabled = !backupBusy) { Text("Restaurar") }
             }
         }
     }
