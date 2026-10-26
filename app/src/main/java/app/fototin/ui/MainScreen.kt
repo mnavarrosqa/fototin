@@ -101,6 +101,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
 import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
@@ -747,6 +749,7 @@ private fun ImportingRow(progress: ImportProgress) {
 }
 
 /** Primeros pasos, cuando todavía no hay fotos. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GettingStarted(onPickPhotos: () -> Unit, onGoToWidgets: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
@@ -764,7 +767,7 @@ private fun GettingStarted(onPickPhotos: () -> Unit, onGoToWidgets: () -> Unit) 
         Step(2, "Agregá un widget", "Una foto sola o un collage. Elegís el estilo y qué fotos muestra: todas, un álbum, favoritas o recuerdos.")
         Step(3, "Disfrutalo", "Las fotos van cambiando solas. Tocá una para escribirle una nota o ajustar cómo se recorta.")
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onPickPhotos) { Text("Elegir fotos") }
             TextButton(onClick = onGoToWidgets) { Text("Ver widgets") }
         }
