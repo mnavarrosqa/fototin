@@ -11,11 +11,14 @@ import app.fototin.data.ImportResult
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
+import app.fototin.data.RemovedPhotos
 import app.fototin.data.Settings
 import app.fototin.widget.PlacedWidget
 import app.fototin.widget.RotationScheduler
 import app.fototin.widget.WidgetSupport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -29,6 +32,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Un borrado reciente que todavía se puede deshacer. */
+class UndoDelete(val message: String, val removed: RemovedPhotos)
 
 /** Progreso de una importación: [done] de [total] fotos procesadas. */
 data class ImportProgress(val done: Int, val total: Int)
@@ -77,6 +83,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _backupBusy = MutableStateFlow(false)
     val backupBusy: StateFlow<Boolean> = _backupBusy.asStateFlow()
 
+    private val _gridSize = MutableStateFlow(settings.gridSize)
+    val gridSize: StateFlow<Int> = _gridSize.asStateFlow()
+
+    private val _dynamicColor = MutableStateFlow(settings.dynamicColor)
+    val dynamicColor: StateFlow<Boolean> = _dynamicColor.asStateFlow()
+
+    /** Borrados que se pueden deshacer desde el aviso de abajo. */
+    private val _undo = MutableSharedFlow<UndoDelete>(extraBufferCapacity = 4)
+    val undo: SharedFlow<UndoDelete> = _undo.asSharedFlow()
+
     /** Mensajes cortos para mostrar abajo de la pantalla. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -123,7 +139,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _openPhotoId.value = id
     }
 
-    fun setNote(id: String, note: String) = updatePhoto { repository.update(id, note = note) }
+    private val noteSaves = mutableMapOf<String, Job>()
+
+    /** Guarda la nota con una pausa: se llama en cada letra, pero solo escribe cuando se deja de tipear. */
+    fun setNote(id: String, note: String) {
+        noteSaves[id]?.cancel()
+        noteSaves[id] = viewModelScope.launch {
+            delay(600)
+            repository.update(id, note = note)
+            refresh()
+            noteSaves.remove(id)
+        }
+    }
 
     fun toggleFavorite(photo: Photo) = updatePhoto { repository.update(photo.id, favorite = !photo.favorite) }
 
@@ -144,11 +171,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deletePhoto(id: String) {
         _openPhotoId.value = null
+        delete(setOf(id))
+    }
+
+    /** Vuelve a poner las fotos de un borrado reciente. */
+    fun undoDelete(removed: RemovedPhotos) {
         viewModelScope.launch {
-            repository.remove(listOf(id))
+            repository.restore(removed)
             refresh()
-            _messages.tryEmit("Foto borrada de Fototin")
         }
+    }
+
+    /** El aviso de "Deshacer" se cerró: ya se pueden borrar los archivos. */
+    fun confirmDelete(removed: RemovedPhotos) {
+        viewModelScope.launch { repository.purge(removed) }
+    }
+
+    private fun delete(ids: Set<String>) {
+        viewModelScope.launch {
+            val removed = repository.remove(ids)
+            refresh()
+            val count = removed.size
+            _undo.tryEmit(
+                UndoDelete(if (count == 1) "Foto borrada de Fototin" else "$count fotos borradas de Fototin", removed),
+            )
+        }
+    }
+
+    fun selectAll() {
+        _selection.value = visiblePhotos.value.mapTo(HashSet()) { it.id }
+    }
+
+    fun setGridSize(size: Int) {
+        settings.gridSize = size
+        _gridSize.value = size
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        settings.dynamicColor = enabled
+        _dynamicColor.value = enabled
     }
 
     fun backup(uri: Uri) = runBackup {
@@ -204,11 +265,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _selection.value = emptySet()
     }
 
-    /** Borra las fotos seleccionadas de Fototin (las originales no se tocan). */
+    /** Borra las fotos seleccionadas de Fototin (las originales no se tocan). Se puede deshacer. */
     fun deleteSelected() {
-        val count = _selection.value.size
-        withSelection { ids -> repository.remove(ids) }
-        if (count > 0) _messages.tryEmit(if (count == 1) "Foto borrada de Fototin" else "$count fotos borradas de Fototin")
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        _selection.value = emptySet()
+        delete(ids)
     }
 
     fun removeSelectedFromAlbum() {

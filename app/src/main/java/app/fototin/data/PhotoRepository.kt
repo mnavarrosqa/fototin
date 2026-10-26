@@ -25,6 +25,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
+/** Fotos recién sacadas de la colección, con su posición, por si se deshace. */
+class RemovedPhotos internal constructor(internal val entries: List<Pair<Int, PhotoRepository.Entry>>) {
+    val size: Int get() = entries.size
+}
+
 /** Resultado de una importación. */
 data class ImportResult(val ids: List<String>, val duplicates: Int, val failed: Int)
 
@@ -59,6 +64,7 @@ class PhotoRepository(context: Context) {
     private val appContext = context.applicationContext
     private val photosDir = File(appContext.filesDir, "photos").apply { mkdirs() }
     private val thumbsDir = File(appContext.filesDir, "thumbs").apply { mkdirs() }
+    private val trashDir = File(appContext.filesDir, "trash").apply { mkdirs() }
     private val indexFile = File(appContext.filesDir, "photos.json")
 
     /**
@@ -80,6 +86,8 @@ class PhotoRepository(context: Context) {
      * índice y quita las que ya no existen.
      */
     private fun reconcile() {
+        // Lo que quedó en la papelera de una sesión anterior ya no se puede deshacer.
+        trashDir.listFiles()?.forEach { it.delete() }
         val entries = readIndex()
         val known = entries.mapTo(HashSet()) { it.id }
         val orphans = photosDir.listFiles { f -> f.extension == "jpg" && f.nameWithoutExtension !in known }
@@ -175,13 +183,41 @@ class PhotoRepository(context: Context) {
         }
     }
 
-    suspend fun remove(ids: Collection<String>) = withContext(Dispatchers.IO) {
+    /**
+     * Saca las fotos de la colección y mueve sus archivos a una papelera, para poder deshacerlo
+     * con [restore]. Los archivos se borran de verdad con [purge] (o al abrir la app la próxima vez).
+     */
+    suspend fun remove(ids: Collection<String>): RemovedPhotos = withContext(Dispatchers.IO) {
         synchronized(lock) {
-            writeIndex(readIndex().filter { it.id !in ids })
-            ids.forEach {
-                photoFile(it).delete()
-                thumbFile(it).delete()
+            val current = readIndex()
+            val removed = current.withIndex().filter { it.value.id in ids }.map { it.index to it.value }
+            writeIndex(current.filter { it.id !in ids })
+            removed.forEach { (_, entry) ->
+                photoFile(entry.id).renameTo(trashFile(entry.id, thumbnail = false))
+                thumbFile(entry.id).renameTo(trashFile(entry.id, thumbnail = true))
             }
+            RemovedPhotos(removed)
+        }
+    }
+
+    /** Devuelve a la colección fotos sacadas con [remove], en el lugar donde estaban. */
+    suspend fun restore(removed: RemovedPhotos) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val entries = readIndex().toMutableList()
+            removed.entries.sortedBy { it.first }.forEach { (position, entry) ->
+                if (!trashFile(entry.id, thumbnail = false).renameTo(photoFile(entry.id))) return@forEach
+                trashFile(entry.id, thumbnail = true).renameTo(thumbFile(entry.id))
+                entries.add(position.coerceAtMost(entries.size), entry)
+            }
+            writeIndex(entries)
+        }
+    }
+
+    /** Borra definitivamente los archivos de fotos sacadas con [remove]. */
+    suspend fun purge(removed: RemovedPhotos) = withContext(Dispatchers.IO) {
+        removed.entries.forEach { (_, entry) ->
+            trashFile(entry.id, thumbnail = false).delete()
+            trashFile(entry.id, thumbnail = true).delete()
         }
     }
 
@@ -282,6 +318,7 @@ class PhotoRepository(context: Context) {
 
     private fun photoFile(id: String) = File(photosDir, "$id.jpg")
     private fun thumbFile(id: String) = File(thumbsDir, "$id.jpg")
+    private fun trashFile(id: String, thumbnail: Boolean) = File(trashDir, if (thumbnail) "${id}_thumb.jpg" else "$id.jpg")
 
     private fun Entry.toPhoto() = Photo(
         id, photoFile(id), thumbFile(id), width, height, takenAt,
@@ -334,7 +371,7 @@ class PhotoRepository(context: Context) {
     }
 
     /** Un foco negativo significa "todavía no calculado". */
-    private data class Entry(
+    internal data class Entry(
         val id: String,
         val width: Int,
         val height: Int,

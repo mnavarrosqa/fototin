@@ -1,8 +1,11 @@
 package app.fototin.ui
 
+import android.os.Build
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import app.fototin.data.Settings
 
 /** Pestaña Ajustes: rotación, copia de seguridad y ayuda. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsTab(
     padding: PaddingValues,
@@ -43,8 +47,10 @@ fun SettingsTab(
     shuffle: Boolean,
     backupBusy: Boolean,
     photoCount: Int,
+    dynamicColor: Boolean,
     onInterval: (Int) -> Unit,
     onShuffle: (Boolean) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -106,6 +112,24 @@ fun SettingsTab(
                 }
             }
         }
+        // Material You existe desde Android 12.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            item {
+                SettingsCard("Apariencia") {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Colores del fondo de pantalla", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "La app toma los colores de tu fondo en lugar de los tonos terracota",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = dynamicColor, onCheckedChange = onDynamicColor)
+                    }
+                }
+            }
+        }
         item {
             SettingsCard("Copia de seguridad") {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -121,7 +145,12 @@ fun SettingsTab(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+                // FlowRow: con letra grande, el segundo botón baja a otra línea en vez de aplastarse.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                ) {
                     FilledTonalButton(onClick = onBackup, enabled = !backupBusy && photoCount > 0) { Text("Guardar copia") }
                     OutlinedButton(onClick = onRestore, enabled = !backupBusy) { Text("Restaurar") }
                 }

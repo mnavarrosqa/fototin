@@ -12,6 +12,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.IntentCompat
 import app.fototin.config.WidgetConfigActivity
 import java.text.SimpleDateFormat
@@ -46,7 +48,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleShare(intent)
 
         setContent {
-            FototinTheme {
+            val dynamicColor by viewModel.dynamicColor.collectAsState()
+            FototinTheme(dynamicColor = dynamicColor) {
                 MainScreen(
                     viewModel = viewModel,
                     onPickPhotos = {

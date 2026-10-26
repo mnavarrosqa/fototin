@@ -11,7 +11,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -64,7 +69,13 @@ fun WidgetsTab(
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(widgets, key = { it.appWidgetId }) { widget ->
-                        PlacedWidgetCard(widget, onNext = { onNext(widget) }, onEdit = { onEdit(widget) })
+                        PlacedWidgetCard(
+                            widget,
+                            onNext = { onNext(widget) },
+                            onEdit = { onEdit(widget) },
+                            // Con uno solo ocupa todo el ancho; con varios se asoma el siguiente.
+                            modifier = Modifier.fillParentMaxWidth(if (widgets.size == 1) 1f else 0.88f),
+                        )
                     }
                 }
             }
@@ -112,15 +123,22 @@ internal fun SectionHeader(title: String, subtitle: String? = null) {
     }
 }
 
+/**
+ * Un widget puesto: vista previa a la izquierda y acciones apiladas a la derecha, para que los
+ * botones entren aunque el teléfono use letra grande.
+ */
 @Composable
-private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: () -> Unit) {
+private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: () -> Unit, modifier: Modifier) {
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.width(if (widget.collage) 260.dp else 190.dp),
+        modifier = modifier,
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.width(if (widget.collage) 150.dp else 120.dp).height(130.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 val preview = widget.preview
                 if (preview != null) {
                     Image(preview.asImageBitmap(), contentDescription = widget.description, modifier = Modifier.fillMaxSize())
@@ -128,12 +146,21 @@ private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: (
                     Text("Sin fotos", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(widget.description, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = onNext) { Text("Cambiar") }
-                OutlinedButton(onClick = onEdit) { Text("Editar") }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(widget.description, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                Spacer(Modifier.height(10.dp))
+                FilledTonalButton(onClick = onNext, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Cambiar", maxLines = 1)
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Editar", maxLines = 1)
+                }
             }
         }
     }

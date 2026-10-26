@@ -101,6 +101,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
 import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.material.icons.filled.Settings
@@ -114,7 +119,6 @@ private sealed interface Dialog {
     data class RenameAlbum(val album: Album) : Dialog
     data class DeleteAlbum(val album: Album) : Dialog
     data object AddToAlbum : Dialog
-    data object DeletePhotos : Dialog
 }
 
 /** Pestañas de la pantalla principal. */
@@ -147,12 +151,25 @@ fun MainScreen(
     val widgets by viewModel.widgets.collectAsState()
     val openPhoto by viewModel.openPhoto.collectAsState()
     val backupBusy by viewModel.backupBusy.collectAsState()
+    val gridSize by viewModel.gridSize.collectAsState()
+    val dynamicColor by viewModel.dynamicColor.collectAsState()
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+    // Borrar no pide confirmación: se puede deshacer desde el aviso.
+    LaunchedEffect(Unit) {
+        viewModel.undo.collect { event ->
+            val result = snackbar.showSnackbar(event.message, actionLabel = "Deshacer", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) {
+                viewModel.undoDelete(event.removed)
+            } else {
+                viewModel.confirmDelete(event.removed)
+            }
+        }
     }
 
     val selecting = selection.isNotEmpty()
@@ -181,6 +198,9 @@ fun MainScreen(
                             }
                         },
                         actions = {
+                            IconButton(onClick = viewModel::selectAll) {
+                                Icon(Icons.Filled.CheckCircle, contentDescription = "Seleccionar todas")
+                            }
                             IconButton(onClick = { dialog = Dialog.AddToAlbum }) {
                                 Icon(Icons.Filled.AddCircle, contentDescription = "Agregar a un álbum")
                             }
@@ -189,7 +209,7 @@ fun MainScreen(
                                     Icon(Icons.Filled.Clear, contentDescription = "Quitar del álbum")
                                 }
                             }
-                            IconButton(onClick = { dialog = Dialog.DeletePhotos }) {
+                            IconButton(onClick = viewModel::deleteSelected) {
                                 Icon(Icons.Filled.Delete, contentDescription = "Borrar de Fototin")
                             }
                         },
@@ -243,11 +263,13 @@ fun MainScreen(
                         importing = importing,
                         selection = selection,
                         sortByTaken = sortByTaken,
+                        gridSize = gridSize,
                         onPickPhotos = onPickPhotos,
                         onGoToWidgets = { tab = Tab.WIDGETS },
                         onOpenAlbum = viewModel::openAlbum,
                         onNewAlbum = { dialog = Dialog.NewAlbum },
                         onSort = viewModel::setSortByTaken,
+                        onGridSize = viewModel::setGridSize,
                         onRenameAlbum = { dialog = Dialog.RenameAlbum(it) },
                         onDeleteAlbum = { dialog = Dialog.DeleteAlbum(it) },
                         onOpenPhoto = viewModel::openPhoto,
@@ -267,8 +289,10 @@ fun MainScreen(
                         shuffle = shuffle,
                         backupBusy = backupBusy,
                         photoCount = photos.size,
+                        dynamicColor = dynamicColor,
                         onInterval = viewModel::setInterval,
                         onShuffle = viewModel::setShuffle,
+                        onDynamicColor = viewModel::setDynamicColor,
                         onBackup = onBackup,
                         onRestore = onRestore,
                     )
@@ -287,7 +311,9 @@ fun MainScreen(
             shown?.let { photo ->
                 PhotoDetailScreen(
                     photo = photo,
+                    photos = visible,
                     albums = albums,
+                    onPageChange = viewModel::openPhoto,
                     onClose = { viewModel.openPhoto(null) },
                     onNote = { viewModel.setNote(photo.id, it) },
                     onFavorite = { viewModel.toggleFavorite(photo) },
@@ -340,16 +366,6 @@ fun MainScreen(
             },
             onNew = { dialog = Dialog.NewAlbum },
         )
-        Dialog.DeletePhotos -> ConfirmDialog(
-            title = "¿Borrar ${selection.size} fotos de Fototin?",
-            text = "Se quitan de todos los widgets y álbumes. Las fotos originales de tu galería no se tocan.",
-            confirm = "Borrar",
-            onDismiss = { dialog = null },
-            onConfirm = {
-                viewModel.deleteSelected()
-                dialog = null
-            },
-        )
     }
 }
 
@@ -365,11 +381,13 @@ private fun PhotosTab(
     importing: ImportProgress?,
     selection: Set<String>,
     sortByTaken: Boolean,
+    gridSize: Int,
     onPickPhotos: () -> Unit,
     onGoToWidgets: () -> Unit,
     onOpenAlbum: (String?) -> Unit,
     onNewAlbum: () -> Unit,
     onSort: (Boolean) -> Unit,
+    onGridSize: (Int) -> Unit,
     onRenameAlbum: (Album) -> Unit,
     onDeleteAlbum: (Album) -> Unit,
     onOpenPhoto: (String) -> Unit,
@@ -378,7 +396,7 @@ private fun PhotosTab(
     val selecting = selection.isNotEmpty()
     LazyVerticalStaggeredGrid(
         state = gridState,
-        columns = StaggeredGridCells.Adaptive(108.dp),
+        columns = StaggeredGridCells.Adaptive(GRID_SIZES[gridSize.coerceIn(GRID_SIZES.indices)]),
         contentPadding = PaddingValues(
             start = 16.dp,
             end = 16.dp,
@@ -424,7 +442,9 @@ private fun PhotosTab(
                     album = currentAlbum,
                     count = visible.size,
                     sortByTaken = sortByTaken,
+                    gridSize = gridSize,
                     onSort = onSort,
+                    onGridSize = onGridSize,
                     onRename = onRenameAlbum,
                     onDelete = onDeleteAlbum,
                 )
@@ -455,6 +475,8 @@ private fun PhotosTab(
                     selecting = selecting,
                     onOpen = { onOpenPhoto(photo.id) },
                     onToggle = { onToggleSelection(photo.id) },
+                    // Las fotos se acomodan con una animación al borrar, agregar o cambiar el orden.
+                    modifier = Modifier.animateItem(),
                 )
             }
         }
@@ -467,7 +489,7 @@ private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -477,13 +499,13 @@ private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
                 Text(
                     if (memories.size == 1) "Hoy tenés 1 recuerdo" else "Hoy tenés ${memories.size} recuerdos",
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Fotos de un día como hoy en otros años. Elegí «Recuerdos» en un widget para verlas en tu pantalla de inicio.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
                 )
             }
         }
@@ -531,7 +553,9 @@ private fun SectionTitle(
     album: Album?,
     count: Int,
     sortByTaken: Boolean,
+    gridSize: Int,
     onSort: (Boolean) -> Unit,
+    onGridSize: (Int) -> Unit,
     onRename: (Album) -> Unit,
     onDelete: (Album) -> Unit,
 ) {
@@ -567,6 +591,17 @@ private fun SectionTitle(
                         onSort(true)
                     },
                 )
+                HorizontalDivider()
+                GRID_SIZE_LABELS.forEachIndexed { size, label ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        trailingIcon = { if (size == gridSize) Icon(Icons.Filled.Check, contentDescription = null) },
+                        onClick = {
+                            menu = false
+                            onGridSize(size)
+                        },
+                    )
+                }
                 if (album != null) {
                     HorizontalDivider()
                     DropdownMenuItem(
@@ -683,7 +718,7 @@ private fun PolaroidStack(photos: List<Photo>) {
                     .background(Color.White, RoundedCornerShape(3.dp))
                     .padding(start = 5.dp, end = 5.dp, top = 5.dp, bottom = 16.dp),
             ) {
-                Box(Modifier.size(68.dp).background(Color(0xFFF3D9D1))) {
+                Box(Modifier.size(68.dp).background(Color(0xFFE6E6FA))) {
                     if (photo != null) {
                         AsyncImage(
                             model = photo.thumb.takeIf { it.exists() } ?: photo.file,
@@ -714,6 +749,7 @@ private fun ImportingRow(progress: ImportProgress) {
 }
 
 /** Primeros pasos, cuando todavía no hay fotos. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GettingStarted(onPickPhotos: () -> Unit, onGoToWidgets: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
@@ -731,7 +767,7 @@ private fun GettingStarted(onPickPhotos: () -> Unit, onGoToWidgets: () -> Unit) 
         Step(2, "Agregá un widget", "Una foto sola o un collage. Elegís el estilo y qué fotos muestra: todas, un álbum, favoritas o recuerdos.")
         Step(3, "Disfrutalo", "Las fotos van cambiando solas. Tocá una para escribirle una nota o ajustar cómo se recorta.")
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onPickPhotos) { Text("Elegir fotos") }
             TextButton(onClick = onGoToWidgets) { Text("Ver widgets") }
         }
@@ -757,12 +793,19 @@ private fun Step(number: Int, title: String, text: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onOpen: () -> Unit, onToggle: () -> Unit) {
+private fun PhotoTile(
+    photo: Photo,
+    selected: Boolean,
+    selecting: Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val haptics = LocalHapticFeedback.current
     val inset by animateDpAsState(if (selected) 8.dp else 0.dp, label = "inset")
     val corner by animateDpAsState(if (selected) 20.dp else 14.dp, label = "corner")
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .aspectRatio(photo.aspectRatio.coerceIn(0.6f, 1.7f))
             .combinedClickable(
@@ -803,5 +846,9 @@ private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onOpe
         }
     }
 }
+
+/** Ancho mínimo de cada foto de la grilla según el tamaño elegido. */
+private val GRID_SIZES = listOf(84.dp, 108.dp, 150.dp)
+private val GRID_SIZE_LABELS = listOf("Fotos chicas", "Fotos medianas", "Fotos grandes")
 
 private fun yearOf(millis: Long): Int = Calendar.getInstance().apply { timeInMillis = millis }.get(Calendar.YEAR)

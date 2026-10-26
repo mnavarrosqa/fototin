@@ -2,6 +2,6 @@
 <resources>
     <!-- Pantalla de inicio de Android 12+: el ícono sobre el crema de la app. -->
     <style name="Theme.Fototin" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowSplashScreenBackground">#FFFFF8F4</item>
+        <item name="android:windowSplashScreenBackground">#FFFBFBFD</item>
     </style>
 </resources>
