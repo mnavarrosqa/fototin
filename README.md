@@ -7,6 +7,10 @@ Abrilo desde el teléfono para instalar o actualizar. Requiere Android 9 o super
 
 ## Qué hace
 
+La app tiene tres pestañas: **Fotos** (tu colección, álbumes y recuerdos), **Widgets** (los que
+tenés puestos y para agregar nuevos) y **Ajustes** (rotación, copia de seguridad y ayuda).
+
+
 - **Elegí fotos de la galería o de Google Fotos** con el selector de fotos del sistema
   (no pide permisos de almacenamiento). Si en tu teléfono está activado Google Fotos como
   "app de contenido multimedia en la nube", sus fotos aparecen en el mismo selector.

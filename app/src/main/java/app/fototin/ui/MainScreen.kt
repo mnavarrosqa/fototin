@@ -100,8 +100,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
-import app.fototin.data.Settings
 import coil.compose.AsyncImage
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /** Diálogo abierto en la pantalla principal. */
 private sealed interface Dialog {
@@ -110,6 +115,13 @@ private sealed interface Dialog {
     data class DeleteAlbum(val album: Album) : Dialog
     data object AddToAlbum : Dialog
     data object DeletePhotos : Dialog
+}
+
+/** Pestañas de la pantalla principal. */
+private enum class Tab(val label: String) {
+    PHOTOS("Fotos"),
+    WIDGETS("Widgets"),
+    SETTINGS("Ajustes"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -136,6 +148,7 @@ fun MainScreen(
     val openPhoto by viewModel.openPhoto.collectAsState()
     val backupBusy by viewModel.backupBusy.collectAsState()
 
+    var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
@@ -143,8 +156,13 @@ fun MainScreen(
     }
 
     val selecting = selection.isNotEmpty()
-    BackHandler(enabled = selecting || currentAlbum != null) {
-        if (selecting) viewModel.clearSelection() else viewModel.openAlbum(null)
+    // Atrás: primero cancela la selección, después vuelve a Fotos y por último sale del álbum.
+    BackHandler(enabled = selecting || tab != Tab.PHOTOS || currentAlbum != null) {
+        when {
+            selecting -> viewModel.clearSelection()
+            tab != Tab.PHOTOS -> tab = Tab.PHOTOS
+            else -> viewModel.openAlbum(null)
+        }
     }
 
     val gridState = rememberLazyStaggeredGridState()
@@ -181,8 +199,28 @@ fun MainScreen(
                     )
                 }
             },
+            bottomBar = {
+                AnimatedVisibility(visible = !selecting, enter = fadeIn(), exit = fadeOut()) {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                        Tab.entries.forEach { item ->
+                            NavigationBarItem(
+                                selected = tab == item,
+                                onClick = { tab = item },
+                                icon = {
+                                    when (item) {
+                                        Tab.PHOTOS -> Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null)
+                                        Tab.WIDGETS -> Icon(painterResource(R.drawable.ic_tab_widgets), contentDescription = null)
+                                        Tab.SETTINGS -> Icon(Icons.Filled.Settings, contentDescription = null)
+                                    }
+                                },
+                                label = { Text(item.label) },
+                            )
+                        }
+                    }
+                }
+            },
             floatingActionButton = {
-                AnimatedVisibility(visible = !selecting, enter = scaleIn(), exit = scaleOut()) {
+                AnimatedVisibility(visible = tab == Tab.PHOTOS && !selecting, enter = scaleIn(), exit = scaleOut()) {
                     ExtendedFloatingActionButton(
                         onClick = onPickPhotos,
                         expanded = atTop || visible.isEmpty(),
@@ -192,95 +230,48 @@ fun MainScreen(
                 }
             },
         ) { padding ->
-            LazyVerticalStaggeredGrid(
-                state = gridState,
-                columns = StaggeredGridCells.Adaptive(108.dp),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 96.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalItemSpacing = 8.dp,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                if (!selecting) {
-                    item(span = StaggeredGridItemSpan.FullLine) {
-                        Header(
-                            stack = memories.ifEmpty { photos.asReversed() },
-                            memoriesCount = memories.size,
-                            onAddWidget = onAddWidget,
-                        )
-                    }
-                    if (widgets.isNotEmpty()) {
-                        item(span = StaggeredGridItemSpan.FullLine) {
-                            WidgetsRow(widgets, onNext = viewModel::advanceWidget, onEdit = { onEditWidget(it.appWidgetId) })
-                        }
-                    }
-                    item(span = StaggeredGridItemSpan.FullLine) {
-                        SettingsCard(
-                            interval = interval,
-                            shuffle = shuffle,
-                            backupBusy = backupBusy,
-                            onInterval = viewModel::setInterval,
-                            onShuffle = viewModel::setShuffle,
-                            onBackup = onBackup,
-                            onRestore = onRestore,
-                        )
-                    }
-                }
-                item(span = StaggeredGridItemSpan.FullLine) {
-                    AlbumRow(
+            Crossfade(tab, label = "tab") { current ->
+                when (current) {
+                    Tab.PHOTOS -> PhotosTab(
+                        padding = padding,
+                        gridState = gridState,
+                        photos = photos,
+                        visible = visible,
                         albums = albums,
-                        allCount = photos.size,
-                        current = currentAlbum,
-                        onOpen = viewModel::openAlbum,
-                        onNew = { dialog = Dialog.NewAlbum },
+                        currentAlbum = currentAlbum,
+                        memories = memories,
+                        importing = importing,
+                        selection = selection,
+                        sortByTaken = sortByTaken,
+                        onPickPhotos = onPickPhotos,
+                        onGoToWidgets = { tab = Tab.WIDGETS },
+                        onOpenAlbum = viewModel::openAlbum,
+                        onNewAlbum = { dialog = Dialog.NewAlbum },
+                        onSort = viewModel::setSortByTaken,
+                        onRenameAlbum = { dialog = Dialog.RenameAlbum(it) },
+                        onDeleteAlbum = { dialog = Dialog.DeleteAlbum(it) },
+                        onOpenPhoto = viewModel::openPhoto,
+                        onToggleSelection = viewModel::toggleSelection,
                     )
-                }
-                importing?.let { progress ->
-                    item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress) }
-                }
-                if (!selecting) {
-                    item(span = StaggeredGridItemSpan.FullLine) {
-                        SectionTitle(
-                            album = currentAlbum,
-                            count = visible.size,
-                            sortByTaken = sortByTaken,
-                            onSort = viewModel::setSortByTaken,
-                            onRename = { a -> dialog = Dialog.RenameAlbum(a) },
-                            onDelete = { a -> dialog = Dialog.DeleteAlbum(a) },
-                        )
-                    }
-                }
-                if (visible.isEmpty() && importing == null) {
-                    item(span = StaggeredGridItemSpan.FullLine) {
-                        if (currentAlbum == null) EmptyState() else EmptyAlbum()
-                    }
-                }
-                // Ordenadas por fecha de la foto, con un separador por año.
-                val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
-                groups.forEach { (year, group) ->
-                    if (year != null) {
-                        item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
-                            Text(
-                                year.toString(),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-                            )
-                        }
-                    }
-                    items(group, key = { it.id }) { photo ->
-                        PhotoTile(
-                            photo = photo,
-                            selected = photo.id in selection,
-                            selecting = selecting,
-                            onOpen = { viewModel.openPhoto(photo.id) },
-                            onToggle = { viewModel.toggleSelection(photo.id) },
-                        )
-                    }
+                    Tab.WIDGETS -> WidgetsTab(
+                        padding = padding,
+                        widgets = widgets,
+                        hasPhotos = photos.isNotEmpty(),
+                        onAdd = onAddWidget,
+                        onNext = viewModel::advanceWidget,
+                        onEdit = { onEditWidget(it.appWidgetId) },
+                    )
+                    Tab.SETTINGS -> SettingsTab(
+                        padding = padding,
+                        interval = interval,
+                        shuffle = shuffle,
+                        backupBusy = backupBusy,
+                        photoCount = photos.size,
+                        onInterval = viewModel::setInterval,
+                        onShuffle = viewModel::setShuffle,
+                        onBackup = onBackup,
+                        onRestore = onRestore,
+                    )
                 }
             }
         }
@@ -363,59 +354,137 @@ fun MainScreen(
 }
 
 @Composable
-private fun Header(stack: List<Photo>, memoriesCount: Int, onAddWidget: (collage: Boolean) -> Unit) {
-    Column {
-        Text("Fototin", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(12.dp))
-        Card(
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        ) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                PolaroidStack(stack.take(3))
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (memoriesCount > 0) {
-                            if (memoriesCount == 1) "Hoy tenés 1 recuerdo" else "Hoy tenés $memoriesCount recuerdos"
-                        } else {
-                            "Tus recuerdos, en la pantalla de inicio"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        if (memoriesCount > 0) {
-                            "Fotos de un día como hoy en otros años. Elegí «Recuerdos» al configurar un widget."
-                        } else {
-                            "Una foto o un collage, con todas tus fotos, un álbum o tus recuerdos."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    var menu by remember { mutableStateOf(false) }
-                    Box {
-                        Button(onClick = { menu = true }) { Text("Agregar widget") }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Foto") },
-                                onClick = {
-                                    menu = false
-                                    onAddWidget(false)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Collage de fotos") },
-                                onClick = {
-                                    menu = false
-                                    onAddWidget(true)
-                                },
-                            )
-                        }
-                    }
+private fun PhotosTab(
+    padding: PaddingValues,
+    gridState: LazyStaggeredGridState,
+    photos: List<Photo>,
+    visible: List<Photo>,
+    albums: List<Album>,
+    currentAlbum: Album?,
+    memories: List<Photo>,
+    importing: ImportProgress?,
+    selection: Set<String>,
+    sortByTaken: Boolean,
+    onPickPhotos: () -> Unit,
+    onGoToWidgets: () -> Unit,
+    onOpenAlbum: (String?) -> Unit,
+    onNewAlbum: () -> Unit,
+    onSort: (Boolean) -> Unit,
+    onRenameAlbum: (Album) -> Unit,
+    onDeleteAlbum: (Album) -> Unit,
+    onOpenPhoto: (String) -> Unit,
+    onToggleSelection: (String) -> Unit,
+) {
+    val selecting = selection.isNotEmpty()
+    LazyVerticalStaggeredGrid(
+        state = gridState,
+        columns = StaggeredGridCells.Adaptive(108.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = padding.calculateTopPadding() + 8.dp,
+            bottom = padding.calculateBottomPadding() + 88.dp,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalItemSpacing = 8.dp,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        if (!selecting) {
+            item(span = StaggeredGridItemSpan.FullLine) {
+                Text(
+                    "Fototin",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (memories.isNotEmpty()) {
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    MemoriesBanner(memories, onClick = { onOpenPhoto(memories.first().id) })
                 }
+            }
+        }
+        if (photos.isNotEmpty()) {
+            item(span = StaggeredGridItemSpan.FullLine) {
+                AlbumRow(
+                    albums = albums,
+                    allCount = photos.size,
+                    current = currentAlbum,
+                    onOpen = onOpenAlbum,
+                    onNew = onNewAlbum,
+                )
+            }
+        }
+        importing?.let { progress ->
+            item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress) }
+        }
+        if (!selecting && photos.isNotEmpty()) {
+            item(span = StaggeredGridItemSpan.FullLine) {
+                SectionTitle(
+                    album = currentAlbum,
+                    count = visible.size,
+                    sortByTaken = sortByTaken,
+                    onSort = onSort,
+                    onRename = onRenameAlbum,
+                    onDelete = onDeleteAlbum,
+                )
+            }
+        }
+        if (visible.isEmpty() && importing == null) {
+            item(span = StaggeredGridItemSpan.FullLine) {
+                if (currentAlbum == null) GettingStarted(onPickPhotos, onGoToWidgets) else EmptyAlbum()
+            }
+        }
+        // Ordenadas por fecha de la foto, con un separador por año.
+        val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
+        groups.forEach { (year, group) ->
+            if (year != null) {
+                item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
+                    Text(
+                        year.toString(),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                    )
+                }
+            }
+            items(group, key = { it.id }) { photo ->
+                PhotoTile(
+                    photo = photo,
+                    selected = photo.id in selection,
+                    selecting = selecting,
+                    onOpen = { onOpenPhoto(photo.id) },
+                    onToggle = { onToggleSelection(photo.id) },
+                )
+            }
+        }
+    }
+}
+
+/** Aviso de recuerdos de hoy, con las fotos apiladas. Al tocarlo abre la primera. */
+@Composable
+private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            PolaroidStack(memories.take(3))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (memories.size == 1) "Hoy tenés 1 recuerdo" else "Hoy tenés ${memories.size} recuerdos",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Fotos de un día como hoy en otros años. Elegí «Recuerdos» en un widget para verlas en tu pantalla de inicio.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                )
             }
         }
     }
@@ -466,25 +535,42 @@ private fun SectionTitle(
     onRename: (Album) -> Unit,
     onDelete: (Album) -> Unit,
 ) {
-    Column(Modifier.padding(top = 8.dp, bottom = 4.dp)) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(album?.name ?: "Tus fotos", style = MaterialTheme.typography.titleLarge)
             Text(
-                "$count fotos · tocá una para editarla, mantené presionado para elegir varias",
+                "$count fotos · mantené presionada una para elegir varias",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (album != null) {
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                IconButton(onClick = { menu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Opciones del álbum")
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        // Orden y opciones del álbum en un solo menú, para no llenar la pantalla de botones.
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Opciones")
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Últimas agregadas") },
+                    trailingIcon = { if (!sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        onSort(false)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Por fecha de la foto") },
+                    trailingIcon = { if (sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        onSort(true)
+                    },
+                )
+                if (album != null) {
+                    HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("Cambiar nombre") },
+                        text = { Text("Cambiar nombre del álbum") },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                         onClick = {
                             menu = false
@@ -502,11 +588,6 @@ private fun SectionTitle(
                 }
             }
         }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        FilterChip(selected = !sortByTaken, onClick = { onSort(false) }, label = { Text("Agregadas") })
-        FilterChip(selected = sortByTaken, onClick = { onSort(true) }, label = { Text("Por fecha de la foto") })
-    }
     }
 }
 
@@ -618,75 +699,6 @@ private fun PolaroidStack(photos: List<Photo>) {
 }
 
 @Composable
-private fun SettingsCard(
-    interval: Int,
-    shuffle: Boolean,
-    backupBusy: Boolean,
-    onInterval: (Int) -> Unit,
-    onShuffle: (Boolean) -> Unit,
-    onBackup: () -> Unit,
-    onRestore: () -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    ) {
-        Column(Modifier.padding(vertical = 16.dp)) {
-            Text("Cambiar de foto", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
-            Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-            ) {
-                Settings.INTERVAL_OPTIONS.forEach { option ->
-                    FilterChip(
-                        selected = option == interval,
-                        onClick = { onInterval(option) },
-                        label = { Text(intervalLabel(option)) },
-                        leadingIcon = if (option == interval) {
-                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 12.dp, horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Orden aleatorio", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Sin repetir hasta mostrar todas",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = shuffle, onCheckedChange = onShuffle)
-            }
-            HorizontalDivider(Modifier.padding(vertical = 12.dp, horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Copia de seguridad", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Fotos, notas y álbumes en un archivo, para cambiar de teléfono o reinstalar",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (backupBusy) {
-                    CircularProgressIndicator(Modifier.padding(horizontal = 16.dp).size(24.dp), strokeWidth = 3.dp)
-                }
-            }
-            Row(Modifier.padding(horizontal = 8.dp)) {
-                TextButton(onClick = onBackup, enabled = !backupBusy) { Text("Guardar copia") }
-                TextButton(onClick = onRestore, enabled = !backupBusy) { Text("Restaurar") }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ImportingRow(progress: ImportProgress) {
     Column(Modifier.padding(vertical = 8.dp)) {
         Text(
@@ -701,28 +713,45 @@ private fun ImportingRow(progress: ImportProgress) {
     }
 }
 
+/** Primeros pasos, cuando todavía no hay fotos. */
 @Composable
-private fun EmptyState() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
-    ) {
+private fun GettingStarted(onPickPhotos: () -> Unit, onGoToWidgets: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Box(
-            Modifier.size(112.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(28.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Image(painterResource(R.drawable.ic_widget_empty), contentDescription = null, modifier = Modifier.size(64.dp))
+            PolaroidStack(emptyList())
         }
+        Spacer(Modifier.height(20.dp))
+        Text("Tus fotos, en tu pantalla de inicio", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(16.dp))
-        Text("Sumá tus primeras fotos", style = MaterialTheme.typography.titleLarge)
+        Step(1, "Elegí tus fotos", "De la galería o de Google Fotos. También podés usar «Compartir → Fototin» desde cualquier app de fotos.")
+        Step(2, "Agregá un widget", "Una foto sola o un collage. Elegís el estilo y qué fotos muestra: todas, un álbum, favoritas o recuerdos.")
+        Step(3, "Disfrutalo", "Las fotos van cambiando solas. Tocá una para escribirle una nota o ajustar cómo se recorta.")
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Tocá «Agregar fotos» para elegirlas de tu galería o de Google Fotos. " +
-                "También podés usar «Compartir → Fototin» desde cualquier app de fotos.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onPickPhotos) { Text("Elegir fotos") }
+            TextButton(onClick = onGoToWidgets) { Text("Ver widgets") }
+        }
+    }
+}
+
+@Composable
+private fun Step(number: Int, title: String, text: String) {
+    Row(Modifier.padding(bottom = 16.dp)) {
+        Box(
+            Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("$number", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleSmall)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -775,48 +804,4 @@ private fun PhotoTile(photo: Photo, selected: Boolean, selecting: Boolean, onOpe
     }
 }
 
-@Composable
-private fun WidgetsRow(widgets: List<PlacedWidget>, onNext: (PlacedWidget) -> Unit, onEdit: (PlacedWidget) -> Unit) {
-    Column(Modifier.padding(top = 8.dp)) {
-        Text("Tus widgets", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            rowItems(widgets, key = { it.appWidgetId }) { widget ->
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    modifier = Modifier.width(if (widget.collage) 232.dp else 168.dp),
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Box(
-                            Modifier.fillMaxWidth().height(132.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val preview = widget.preview
-                            if (preview != null) {
-                                Image(preview.asImageBitmap(), contentDescription = widget.description, modifier = Modifier.fillMaxSize())
-                            } else {
-                                Text("Sin fotos", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text(widget.description, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        Row {
-                            TextButton(onClick = { onNext(widget) }) { Text("Cambiar") }
-                            TextButton(onClick = { onEdit(widget) }) { Text("Editar") }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 private fun yearOf(millis: Long): Int = Calendar.getInstance().apply { timeInMillis = millis }.get(Calendar.YEAR)
-
-private fun intervalLabel(minutes: Int): String = when {
-    minutes == 0 -> "Al tocar"
-    minutes < 60 -> "$minutes min"
-    minutes < 1440 -> "${minutes / 60} h"
-    else -> "1 día"
-}
