@@ -20,6 +20,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,7 +34,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -39,13 +42,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +68,6 @@ import app.fototin.data.Album
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -74,7 +76,9 @@ import kotlin.math.roundToInt
 @Composable
 fun PhotoDetailScreen(
     photo: Photo,
+    photos: List<Photo>,
     albums: List<Album>,
+    onPageChange: (String) -> Unit,
     onClose: () -> Unit,
     onNote: (String) -> Unit,
     onFavorite: () -> Unit,
@@ -83,16 +87,20 @@ fun PhotoDetailScreen(
     onDelete: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
-    var confirmDelete by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
 
-    // El foco se mueve al instante en pantalla y se guarda al soltar.
+    // El foco se mueve al instante en pantalla; se guarda en el repositorio enseguida.
     var focus by remember(photo.id) { mutableStateOf(photo.focusX to photo.focusY) }
-
+    // La nota se guarda con una pausa (en el ViewModel), así no se escribe en cada letra.
     var note by remember(photo.id) { mutableStateOf(photo.note) }
-    LaunchedEffect(note) {
-        delay(600)
-        if (note.trim() != photo.note) onNote(note)
+
+    // Deslizar pasa a la foto anterior o siguiente de la grilla.
+    val pages = photos.ifEmpty { listOf(photo) }
+    val pager = rememberPagerState(initialPage = pages.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)) { pages.size }
+    LaunchedEffect(pager, pages) {
+        snapshotFlow { pager.settledPage }.collect { page ->
+            pages.getOrNull(page)?.let { if (it.id != photo.id) onPageChange(it.id) }
+        }
     }
 
     Scaffold(
@@ -113,7 +121,7 @@ fun PhotoDetailScreen(
                             tint = if (photo.favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    IconButton(onClick = { confirmDelete = true }) {
+                    IconButton(onClick = onDelete) {
                         Icon(Icons.Filled.Delete, contentDescription = "Borrar de Fototin")
                     }
                 },
@@ -127,13 +135,37 @@ fun PhotoDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
-            FocusPicker(photo, focus) { x, y ->
-                focus = x to y
-                onFocus(x, y)
+            HorizontalPager(
+                state = pager,
+                pageSpacing = 16.dp,
+                beyondViewportPageCount = 1,
+                modifier = Modifier.fillMaxWidth().height(360.dp),
+            ) { page ->
+                val pagePhoto = pages[page]
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    FocusPicker(
+                        photo = pagePhoto,
+                        focus = if (pagePhoto.id == photo.id) focus else pagePhoto.focusX to pagePhoto.focusY,
+                    ) { x, y ->
+                        if (pagePhoto.id == photo.id) {
+                            focus = x to y
+                            onFocus(x, y)
+                        }
+                    }
+                }
+            }
+            if (pages.size > 1) {
+                Text(
+                    "${pager.currentPage + 1} de ${pages.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "Tocá la parte de la foto que siempre tiene que verse en los widgets.",
+                "Tocá la parte de la foto que siempre tiene que verse en los widgets. Deslizá para ver otras.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -150,7 +182,10 @@ fun PhotoDetailScreen(
 
             OutlinedTextField(
                 value = note,
-                onValueChange = { note = it.take(NOTE_MAX) },
+                onValueChange = {
+                    note = it.take(NOTE_MAX)
+                    onNote(note)
+                },
                 label = { Text("Nota") },
                 placeholder = { Text("Mi primer día en la playa") },
                 supportingText = { Text("Se muestra en el widget si activás «Mostrar nota o fecha». ${note.length}/$NOTE_MAX") },
@@ -176,21 +211,6 @@ fun PhotoDetailScreen(
             }
         }
     }
-
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("¿Borrar esta foto de Fototin?") },
-            text = { Text("Se quita de todos los widgets y álbumes. La original de tu galería no se toca.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    onDelete()
-                }) { Text("Borrar") }
-            },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } },
-        )
-    }
 }
 
 private const val NOTE_MAX = 40
@@ -199,16 +219,18 @@ private const val NOTE_MAX = 40
 @Composable
 private fun FocusPicker(photo: Photo, focus: Pair<Float, Float>, onFocus: (Float, Float) -> Unit) {
     val haptics = LocalHapticFeedback.current
+    // pointerInput se arma una sola vez por foto: así siempre llama a la versión más nueva.
+    val currentOnFocus by rememberUpdatedState(onFocus)
+    // Sin fillMaxWidth: aspectRatio elige el tamaño más grande que entra en la página.
     BoxWithConstraints(
         Modifier
-            .fillMaxWidth()
             .aspectRatio(photo.aspectRatio.coerceIn(0.6f, 1.8f))
             .clip(RoundedCornerShape(20.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .pointerInput(photo.id) {
                 detectTapGestures { offset ->
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onFocus(
+                    currentOnFocus(
                         (offset.x / size.width).coerceIn(0f, 1f),
                         (offset.y / size.height).coerceIn(0f, 1f),
                     )

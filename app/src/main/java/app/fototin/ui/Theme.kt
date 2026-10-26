@@ -1,6 +1,12 @@
 package app.fototin.ui
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext as LocalContextCompose
+import app.fototin.data.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -61,11 +67,22 @@ private val AppTypography = Base.copy(
     titleMedium = Base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
 )
 
+/**
+ * @param dynamicColor usar los colores del fondo de pantalla (Android 12+). Por defecto, lo que
+ * eligió el usuario en Ajustes.
+ */
 @Composable
-fun FototinTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
-        typography = AppTypography,
-        content = content,
-    )
+fun FototinTheme(
+    dynamicColor: Boolean = remember { Settings(LocalContextCompose.current).dynamicColor },
+    content: @Composable () -> Unit,
+) {
+    val dark = isSystemInDarkTheme()
+    val context = LocalContextCompose.current
+    val colors = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        dark -> Dark
+        else -> Light
+    }
+    MaterialTheme(colorScheme = colors, typography = AppTypography, content = content)
 }

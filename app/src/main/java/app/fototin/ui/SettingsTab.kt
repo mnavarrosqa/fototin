@@ -1,5 +1,6 @@
 package app.fototin.ui
 
+import android.os.Build
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -43,8 +44,10 @@ fun SettingsTab(
     shuffle: Boolean,
     backupBusy: Boolean,
     photoCount: Int,
+    dynamicColor: Boolean,
     onInterval: (Int) -> Unit,
     onShuffle: (Boolean) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -103,6 +106,24 @@ fun SettingsTab(
                         )
                     }
                     Switch(checked = shuffle, onCheckedChange = onShuffle)
+                }
+            }
+        }
+        // Material You existe desde Android 12.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            item {
+                SettingsCard("Apariencia") {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Colores del fondo de pantalla", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "La app toma los colores de tu fondo en lugar de los tonos terracota",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = dynamicColor, onCheckedChange = onDynamicColor)
+                    }
                 }
             }
         }
