@@ -489,7 +489,7 @@ private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -499,13 +499,13 @@ private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
                 Text(
                     if (memories.size == 1) "Hoy tenés 1 recuerdo" else "Hoy tenés ${memories.size} recuerdos",
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Fotos de un día como hoy en otros años. Elegí «Recuerdos» en un widget para verlas en tu pantalla de inicio.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
                 )
             }
         }
@@ -718,7 +718,7 @@ private fun PolaroidStack(photos: List<Photo>) {
                     .background(Color.White, RoundedCornerShape(3.dp))
                     .padding(start = 5.dp, end = 5.dp, top = 5.dp, bottom = 16.dp),
             ) {
-                Box(Modifier.size(68.dp).background(Color(0xFFF3D9D1))) {
+                Box(Modifier.size(68.dp).background(Color(0xFFE6E6FA))) {
                     if (photo != null) {
                         AsyncImage(
                             model = photo.thumb.takeIf { it.exists() } ?: photo.file,

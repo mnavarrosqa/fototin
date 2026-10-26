@@ -111,7 +111,7 @@ fun EmptyWidget(message: String) {
         modifier = GlanceModifier
             .fillMaxSize()
             .cornerRadius(28.dp)
-            .background(Color(0xFFFBE3DA))
+            .background(Color(0xFFEEEDFF))
             .padding(12.dp)
             .clickable(actionStartActivity<MainActivity>()),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -125,7 +125,7 @@ fun EmptyWidget(message: String) {
         Text(
             text = message,
             style = TextStyle(
-                color = ColorProvider(Color(0xFF5C2A20)),
+                color = ColorProvider(Color(0xFF2E2A6B)),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,

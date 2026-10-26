@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- En modo oscuro, la pantalla de inicio usa el mismo negro que la app. -->
+    <style name="Theme.Fototin" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenBackground">#FF0E0E12</item>
+    </style>
+</resources>
