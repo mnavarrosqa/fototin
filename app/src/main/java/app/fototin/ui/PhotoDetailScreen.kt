@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -128,18 +129,15 @@ fun PhotoDetailScreen(
             )
         },
     ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-        ) {
+        // Con el teléfono desplegado: foto de un lado y datos del otro. Si hay bisagra vertical,
+        // los paneles se cortan justo en ella para que nada quede sobre el pliegue.
+        val fold = rememberFoldingFeature()
+        val photoSection: @Composable (Modifier) -> Unit = { pagerModifier ->
             HorizontalPager(
                 state = pager,
                 pageSpacing = 16.dp,
                 beyondViewportPageCount = 1,
-                modifier = Modifier.fillMaxWidth().height(360.dp),
+                modifier = Modifier.fillMaxWidth().then(pagerModifier),
             ) { page ->
                 val pagePhoto = pages[page]
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -153,7 +151,7 @@ fun PhotoDetailScreen(
                         }
                     }
                 }
-            }
+        }
             if (pages.size > 1) {
                 Text(
                     "${pager.currentPage + 1} de ${pages.size}",
@@ -163,6 +161,8 @@ fun PhotoDetailScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
             }
+        }
+        val detailsSection: @Composable () -> Unit = {
             Spacer(Modifier.height(8.dp))
             Text(
                 "Tocá la parte de la foto que siempre tiene que verse en los widgets. Deslizá para ver otras.",
@@ -177,7 +177,7 @@ fun PhotoDetailScreen(
                 CropPreview(photo, focus, Modifier.width(96.dp).aspectRatio(1f))
                 CropPreview(photo, focus, Modifier.width(72.dp).aspectRatio(0.6f))
                 CropPreview(photo, focus, Modifier.width(160.dp).aspectRatio(2f))
-            }
+        }
             Spacer(Modifier.height(20.dp))
 
             OutlinedTextField(
@@ -208,6 +208,39 @@ fun PhotoDetailScreen(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
+            }
+        }
+        if (isWideScreen()) {
+            Row(Modifier.padding(padding).fillMaxSize()) {
+                val hinge = fold?.takeIf { it.isBook }?.hingeDp()
+                Column(
+                    (if (hinge != null) Modifier.width(hinge.first) else Modifier.weight(1.3f))
+                        .fillMaxHeight()
+                        .padding(16.dp),
+                ) {
+                    photoSection(Modifier.weight(1f))
+                }
+                if (hinge != null) Spacer(Modifier.width(hinge.second - hinge.first))
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                ) {
+                    detailsSection()
+                }
+            }
+        } else {
+            Column(
+                Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            ) {
+                photoSection(Modifier.height(360.dp))
+                detailsSection()
             }
         }
     }

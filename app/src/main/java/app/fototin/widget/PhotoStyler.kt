@@ -31,6 +31,9 @@ object PhotoStyler {
 
     private const val SHADOW = 0x40000000
 
+    /** Proporción a partir de la cual el collage pasa a una sola fila o columna. */
+    private const val STRIP_ASPECT = 2.4f
+
     /**
      * @param caption texto opcional (por ejemplo, la fecha) que se dibuja sobre la foto o,
      * en la Polaroid y el Marco, en el borde inferior.
@@ -124,18 +127,13 @@ object PhotoStyler {
         val bounds = RectF(0f, 0f, out.width.toFloat(), out.height.toFloat())
         val gap = 4 * dp
         val wide = bounds.width() >= bounds.height()
-        val cells = when (sources.size) {
-            0 -> emptyList()
-            1 -> listOf(bounds)
-            2 -> if (wide) split(bounds, gap, horizontal = true) else split(bounds, gap, horizontal = false)
-            3 -> {
-                val (main, rest) = split(bounds, gap, horizontal = wide)
-                listOf(main) + split(rest, gap, horizontal = !wide)
-            }
-            else -> {
-                val (a, b) = split(bounds, gap, horizontal = false)
-                split(a, gap, horizontal = true) + split(b, gap, horizontal = true)
-            }
+        val aspect = bounds.width() / bounds.height()
+        val cells = when {
+            // Muy ancho o muy angosto (pantallas externas de foldables, launchers desplegados):
+            // todas en fila o en columna, que en esas formas se ven mejor que en grilla.
+            sources.size > 1 && aspect >= STRIP_ASPECT -> strip(bounds, sources.size, gap, horizontal = true)
+            sources.size > 1 && aspect <= 1f / STRIP_ASPECT -> strip(bounds, sources.size, gap, horizontal = false)
+            else -> gridCells(bounds, sources.size, gap, wide)
         }
         // Las esquinas exteriores siguen el radio del launcher; las interiores son más chicas.
         val outer = cornerDp * dp
@@ -152,6 +150,35 @@ object PhotoStyler {
             )
         }
         return out
+    }
+
+    /** Distribución en grilla para 1 a 4 fotos según si el widget es ancho o alto. */
+    private fun gridCells(bounds: RectF, count: Int, gap: Float, wide: Boolean): List<RectF> = when (count) {
+        0 -> emptyList()
+        1 -> listOf(bounds)
+        2 -> split(bounds, gap, horizontal = wide)
+        3 -> {
+            val (main, rest) = split(bounds, gap, horizontal = wide)
+            listOf(main) + split(rest, gap, horizontal = !wide)
+        }
+        else -> {
+            val (a, b) = split(bounds, gap, horizontal = false)
+            split(a, gap, horizontal = true) + split(b, gap, horizontal = true)
+        }
+    }
+
+    /** [count] celdas iguales una al lado de la otra (o una debajo de la otra). */
+    private fun strip(bounds: RectF, count: Int, gap: Float, horizontal: Boolean): List<RectF> {
+        val total = (if (horizontal) bounds.width() else bounds.height()) - gap * (count - 1)
+        val size = total / count
+        return List(count) { i ->
+            val start = (if (horizontal) bounds.left else bounds.top) + i * (size + gap)
+            if (horizontal) {
+                RectF(start, bounds.top, if (i == count - 1) bounds.right else start + size, bounds.bottom)
+            } else {
+                RectF(bounds.left, start, bounds.right, if (i == count - 1) bounds.bottom else start + size)
+            }
+        }
     }
 
     private data class Target(val bitmap: Bitmap, val canvas: Canvas, val dp: Float)
