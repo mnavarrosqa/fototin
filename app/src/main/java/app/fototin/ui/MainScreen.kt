@@ -153,6 +153,7 @@ fun MainScreen(
     val backupBusy by viewModel.backupBusy.collectAsState()
     val gridSize by viewModel.gridSize.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
+    val cleaning by viewModel.cleaning.collectAsState()
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
     var dialog by remember { mutableStateOf<Dialog?>(null) }
@@ -293,6 +294,8 @@ fun MainScreen(
                         onInterval = viewModel::setInterval,
                         onShuffle = viewModel::setShuffle,
                         onDynamicColor = viewModel::setDynamicColor,
+                        cleaning = cleaning,
+                        onRemoveDuplicates = viewModel::removeDuplicates,
                         onBackup = onBackup,
                         onRestore = onRestore,
                     )

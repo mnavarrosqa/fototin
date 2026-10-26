@@ -113,7 +113,13 @@ class PhotoRepository(context: Context) {
         val current = readIndex()
         val ids = current.mapTo(HashSet()) { it.id }
         val hashes = current.mapNotNullTo(HashSet()) { it.hash }
-        parseEntries(json).filter { it.id !in ids && (it.hash == null || it.hash !in hashes) }.mapTo(HashSet()) { it.id }
+        val images = current.mapNotNullTo(mutableListOf()) { it.fingerprint() }
+        parseEntries(json).filter { entry ->
+            val image = entry.fingerprint()
+            val sameImage = image != null && images.any { ImageHash.sameImage(it, image) }
+            if (!sameImage && image != null) images += image
+            entry.id !in ids && (entry.hash == null || entry.hash !in hashes) && !sameImage
+        }.mapTo(HashSet()) { it.id }
     }
 
     /** Suma al índice las fotos restauradas, cuyos archivos ya se copiaron. Devuelve cuántas. */
@@ -135,9 +141,22 @@ class PhotoRepository(context: Context) {
             val done = AtomicInteger()
             val duplicates = AtomicInteger()
             val permits = Semaphore(IMPORT_PARALLELISM)
-            // Huellas de las fotos que ya estaban y de las que se van importando ahora.
-            val known: MutableSet<String> = ConcurrentHashMap.newKeySet<String>().apply {
-                synchronized(lock) { readIndex() }.mapNotNullTo(this) { it.hash }
+            val existing = synchronized(lock) { readIndex() }
+            // Dos controles: el archivo idéntico (rápido) y la huella visual, que reconoce la misma
+            // foto aunque llegue recomprimida o sin datos EXIF por otro camino.
+            val knownFiles: MutableSet<String> = ConcurrentHashMap.newKeySet<String>().apply {
+                existing.mapNotNullTo(this) { it.hash }
+            }
+            val knownImages = existing.mapNotNullTo(mutableListOf()) { it.fingerprint() }
+            val isNewImage = { fingerprint: Fingerprint ->
+                synchronized(knownImages) {
+                    if (knownImages.any { ImageHash.sameImage(it, fingerprint) }) {
+                        false
+                    } else {
+                        knownImages += fingerprint
+                        true
+                    }
+                }
             }
             val results = coroutineScope {
                 uris.map { uri ->
@@ -145,12 +164,9 @@ class PhotoRepository(context: Context) {
                         permits.withPermit {
                             runCatching {
                                 val hash = fingerprint(uri)
-                                if (hash != null && !known.add(hash)) {
-                                    duplicates.incrementAndGet()
-                                    null
-                                } else {
-                                    importOne(uri, hash)
-                                }
+                                val entry = if (hash != null && !knownFiles.add(hash)) null else importOne(uri, hash, isNewImage)
+                                if (entry == null) duplicates.incrementAndGet()
+                                entry
                             }.also { onProgress(done.incrementAndGet(), uris.size) }
                         }
                     }
@@ -160,6 +176,35 @@ class PhotoRepository(context: Context) {
             synchronized(lock) { writeIndex(readIndex() + imported) }
             ImportResult(imported.map { it.id }, duplicates.get(), results.count { it.isFailure })
         }
+
+    /**
+     * Fotos repetidas que ya están en la colección: para cada una, el id de la que se queda (la
+     * primera que se agregó).
+     */
+    suspend fun duplicatesInLibrary(): Map<String, String> = withContext(Dispatchers.IO) {
+        completeMissingData()
+        synchronized(lock) { findDuplicates(readIndex().map { it.id to it.fingerprint() }) }
+    }
+
+    /**
+     * Antes de quitar repetidas, pasa a la foto que se queda lo que la repetida tenía de más:
+     * la marca de favorita y la nota, si la otra no tiene.
+     */
+    suspend fun mergeInto(duplicates: Map<String, String>) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val byId = readIndex().associateBy { it.id }
+            writeIndex(
+                readIndex().map { kept ->
+                    val copies = duplicates.filterValues { it == kept.id }.keys.mapNotNull { byId[it] }
+                    if (copies.isEmpty()) return@map kept
+                    kept.copy(
+                        favorite = kept.favorite || copies.any { it.favorite },
+                        note = kept.note.ifBlank { copies.firstOrNull { it.note.isNotBlank() }?.note.orEmpty() },
+                    )
+                },
+            )
+        }
+    }
 
     /** Cambia la nota, la marca de favorita o el punto de foco de una foto. */
     suspend fun update(
@@ -244,7 +289,16 @@ class PhotoRepository(context: Context) {
                 writeIndex(readIndex().map { e -> found[e.id]?.let { (x, y) -> e.copy(focusX = x, focusY = y) } ?: e })
             }
         }
-        found.isNotEmpty()
+        // Huella visual de las fotos importadas antes de que existiera.
+        val hashes = synchronized(lock) { readIndex() }.filter { it.visualHash == null }.mapNotNull { entry ->
+            decodeForSize(photoFile(entry.id), HASH_SOURCE_PX)?.let { bitmap ->
+                entry.id to visualHash(bitmap).also { bitmap.recycle() }
+            }
+        }.toMap()
+        if (hashes.isNotEmpty()) {
+            synchronized(lock) { writeIndex(readIndex().map { e -> hashes[e.id]?.let { e.copy(visualHash = it) } ?: e }) }
+        }
+        found.isNotEmpty() || hashes.isNotEmpty()
     }
 
     /** Huella SHA-256 del archivo original, para reconocer fotos repetidas. */
@@ -261,7 +315,8 @@ class PhotoRepository(context: Context) {
         digest.digest().joinToString("") { "%02x".format(it) }
     }.getOrNull()
 
-    private fun importOne(uri: Uri, hash: String?): Entry {
+    /** Devuelve null si [isNewImage] dice que la foto ya está (y entonces no guarda nada). */
+    private fun importOne(uri: Uri, hash: String?, isNewImage: (Fingerprint) -> Boolean): Entry? {
         val resolver = appContext.contentResolver
         // ImageDecoder ya aplica la rotación EXIF.
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
@@ -275,11 +330,19 @@ class PhotoRepository(context: Context) {
             }
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
+        val visual = visualHash(bitmap)
+        if (!isNewImage(Fingerprint(visual, bitmap.width.toFloat() / bitmap.height))) {
+            bitmap.recycle()
+            return null
+        }
         val id = "${System.currentTimeMillis()}_${UUID.randomUUID()}"
         photoFile(id).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         saveThumb(bitmap, thumbFile(id))
         val (fx, fy) = FocusFinder.find(bitmap)
-        val entry = Entry(id, bitmap.width, bitmap.height, takenAt(uri) ?: System.currentTimeMillis(), fx, fy, hash = hash)
+        val entry = Entry(
+            id, bitmap.width, bitmap.height, takenAt(uri) ?: System.currentTimeMillis(), fx, fy,
+            hash = hash, visualHash = visual,
+        )
         bitmap.recycle()
         return entry
     }
@@ -345,6 +408,7 @@ class PhotoRepository(context: Context) {
                     note = o.optString("n"),
                     favorite = o.optBoolean("fav"),
                     hash = o.optString("hash").ifEmpty { null },
+                    visualHash = if (o.has("ph")) o.optLong("ph") else null,
                 )
             }
         }.getOrDefault(emptyList())
@@ -364,7 +428,8 @@ class PhotoRepository(context: Context) {
             array.put(
                 JSONObject().put("id", it.id).put("w", it.width).put("h", it.height).put("t", it.takenAt)
                     .put("fx", it.focusX.toDouble()).put("fy", it.focusY.toDouble())
-                    .put("n", it.note).put("fav", it.favorite).put("hash", it.hash ?: ""),
+                    .put("n", it.note).put("fav", it.favorite).put("hash", it.hash ?: "")
+                    .apply { it.visualHash?.let { ph -> put("ph", ph) } },
             )
         }
         return array.toString()
@@ -381,12 +446,34 @@ class PhotoRepository(context: Context) {
         val note: String = "",
         val favorite: Boolean = false,
         val hash: String? = null,
-    )
+        /** Huella visual ([ImageHash]); null en fotos que todavía no se analizaron. */
+        val visualHash: Long? = null,
+    ) {
+        fun fingerprint(): Fingerprint? =
+            visualHash?.takeIf { width > 0 && height > 0 }?.let { Fingerprint(it, width.toFloat() / height) }
+    }
 
     companion object {
         private const val MAX_SIDE_PX = 1600
         private const val THUMB_PX = 360
         private const val IMPORT_PARALLELISM = 3
+        /** Resolución desde la que se calcula la huella visual de fotos ya guardadas. */
+        private const val HASH_SOURCE_PX = 128
+
+        /** Huella visual de un bitmap: lo achica en dos pasos (para suavizarlo) y lo pasa a grises. */
+        fun visualHash(bitmap: Bitmap): Long {
+            val small = Bitmap.createScaledBitmap(bitmap, ImageHash.GRID_WIDTH * 8, ImageHash.GRID_HEIGHT * 8, true)
+            val grid = Bitmap.createScaledBitmap(small, ImageHash.GRID_WIDTH, ImageHash.GRID_HEIGHT, true)
+            val pixels = IntArray(ImageHash.GRID_WIDTH * ImageHash.GRID_HEIGHT)
+            grid.getPixels(pixels, 0, ImageHash.GRID_WIDTH, 0, 0, ImageHash.GRID_WIDTH, ImageHash.GRID_HEIGHT)
+            if (small !== bitmap) small.recycle()
+            grid.recycle()
+            val gray = IntArray(pixels.size) { i ->
+                val c = pixels[i]
+                (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+            }
+            return ImageHash.dHash(gray)
+        }
 
         /** Protege `photos.json` y su copia en memoria: los usan la app, los widgets y el worker. */
         private val lock = Any()

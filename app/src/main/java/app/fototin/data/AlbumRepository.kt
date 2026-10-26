@@ -37,6 +37,19 @@ class AlbumRepository(context: Context) {
     fun remove(id: String, photoIds: Collection<String>) =
         edit(id) { album -> album.copy(photoIds = album.photoIds - photoIds.toSet()) }
 
+    /**
+     * Al quitar fotos repetidas, los álbumes que tenían una copia pasan a tener la foto que se queda.
+     * [replacements] va de la repetida a la que se queda.
+     */
+    fun replacePhotos(replacements: Map<String, String>) = synchronized(lock) {
+        write(
+            read().map { album ->
+                val extra = album.photoIds.mapNotNull { replacements[it] }
+                if (extra.isEmpty()) album else album.copy(photoIds = (album.photoIds + extra).distinct())
+            },
+        )
+    }
+
     private fun edit(id: String, change: (Album) -> Album) = synchronized(lock) {
         write(read().map { if (it.id == id) change(it) else it })
     }

@@ -83,6 +83,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _backupBusy = MutableStateFlow(false)
     val backupBusy: StateFlow<Boolean> = _backupBusy.asStateFlow()
 
+    /** Buscando fotos repetidas. */
+    private val _cleaning = MutableStateFlow(false)
+    val cleaning: StateFlow<Boolean> = _cleaning.asStateFlow()
+
     private val _gridSize = MutableStateFlow(settings.gridSize)
     val gridSize: StateFlow<Int> = _gridSize.asStateFlow()
 
@@ -194,6 +198,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val count = removed.size
             _undo.tryEmit(
                 UndoDelete(if (count == 1) "Foto borrada de Fototin" else "$count fotos borradas de Fototin", removed),
+            )
+        }
+    }
+
+    /**
+     * Busca fotos repetidas ya guardadas y las quita, quedándose con la más antigua de cada grupo.
+     * Antes le pasa la marca de favorita, la nota y los álbumes de las copias. Se puede deshacer.
+     */
+    fun removeDuplicates() {
+        if (_cleaning.value) return
+        _cleaning.value = true
+        viewModelScope.launch {
+            val duplicates = repository.duplicatesInLibrary()
+            if (duplicates.isEmpty()) {
+                _cleaning.value = false
+                _messages.tryEmit("No hay fotos repetidas")
+                return@launch
+            }
+            repository.mergeInto(duplicates)
+            withContext(Dispatchers.IO) { albumRepository.replacePhotos(duplicates) }
+            val removed = repository.remove(duplicates.keys)
+            refresh()
+            _cleaning.value = false
+            val count = removed.size
+            _undo.tryEmit(
+                UndoDelete(if (count == 1) "Se quitó 1 foto repetida" else "Se quitaron $count fotos repetidas", removed),
             )
         }
     }
