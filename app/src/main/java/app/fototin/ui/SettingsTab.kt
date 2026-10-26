@@ -51,6 +51,8 @@ fun SettingsTab(
     onInterval: (Int) -> Unit,
     onShuffle: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
+    cleaning: Boolean,
+    onRemoveDuplicates: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -154,6 +156,29 @@ fun SettingsTab(
                     FilledTonalButton(onClick = onBackup, enabled = !backupBusy && photoCount > 0) { Text("Guardar copia") }
                     OutlinedButton(onClick = onRestore, enabled = !backupBusy) { Text("Restaurar") }
                 }
+            }
+        }
+        item {
+            SettingsCard("Fotos repetidas") {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(
+                        "Las fotos que ya están no se vuelven a agregar, aunque lleguen por otro camino " +
+                            "(galería, Google Fotos o Compartir). Si ya tenés repetidas, quitalas acá: " +
+                            "se conserva la más antigua con su nota, favorita y álbumes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (cleaning) {
+                        CircularProgressIndicator(Modifier.padding(start = 12.dp).size(24.dp), strokeWidth = 3.dp)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = onRemoveDuplicates,
+                    enabled = !cleaning && photoCount > 1,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                ) { Text("Quitar repetidas") }
             }
         }
         item {
