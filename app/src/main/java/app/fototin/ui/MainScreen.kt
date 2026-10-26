@@ -101,6 +101,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
 import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.CheckCircle
@@ -186,8 +189,32 @@ fun MainScreen(
     val gridState = rememberLazyStaggeredGridState()
     val atTop by remember { derivedStateOf { gridState.firstVisibleItemIndex == 0 } }
 
+    // Desplegado o en tablet, las pestañas pasan a una barra lateral.
+    val wide = isWideScreen()
+
     Box(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize()) {
+        if (wide) {
+            AnimatedVisibility(visible = !selecting, enter = fadeIn(), exit = fadeOut()) {
+                NavigationRail(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.fillMaxHeight(),
+                ) {
+                    Spacer(Modifier.weight(1f))
+                    Tab.entries.forEach { item ->
+                        NavigationRailItem(
+                            selected = tab == item,
+                            onClick = { tab = item },
+                            icon = { TabIcon(item) },
+                            label = { Text(item.label) },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
         Scaffold(
+            modifier = Modifier.weight(1f),
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 AnimatedVisibility(visible = selecting, enter = fadeIn(), exit = fadeOut()) {
@@ -221,19 +248,13 @@ fun MainScreen(
                 }
             },
             bottomBar = {
-                AnimatedVisibility(visible = !selecting, enter = fadeIn(), exit = fadeOut()) {
+                AnimatedVisibility(visible = !selecting && !wide, enter = fadeIn(), exit = fadeOut()) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                         Tab.entries.forEach { item ->
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = { tab = item },
-                                icon = {
-                                    when (item) {
-                                        Tab.PHOTOS -> Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null)
-                                        Tab.WIDGETS -> Icon(painterResource(R.drawable.ic_tab_widgets), contentDescription = null)
-                                        Tab.SETTINGS -> Icon(Icons.Filled.Settings, contentDescription = null)
-                                    }
-                                },
+                                icon = { TabIcon(item) },
                                 label = { Text(item.label) },
                             )
                         }
@@ -303,6 +324,8 @@ fun MainScreen(
             }
         }
 
+        }
+
         AnimatedVisibility(
             visible = openPhoto != null,
             enter = slideInVertically { it / 3 } + fadeIn(),
@@ -369,6 +392,15 @@ fun MainScreen(
             },
             onNew = { dialog = Dialog.NewAlbum },
         )
+    }
+}
+
+@Composable
+private fun TabIcon(tab: Tab) {
+    when (tab) {
+        Tab.PHOTOS -> Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null)
+        Tab.WIDGETS -> Icon(painterResource(R.drawable.ic_tab_widgets), contentDescription = null)
+        Tab.SETTINGS -> Icon(Icons.Filled.Settings, contentDescription = null)
     }
 }
 

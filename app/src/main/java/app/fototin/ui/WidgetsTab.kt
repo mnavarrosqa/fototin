@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
@@ -54,7 +56,8 @@ fun WidgetsTab(
             bottom = padding.calculateBottomPadding() + 24.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize(),
+        // En pantallas anchas, una columna centrada se lee mejor que un renglón de lado a lado.
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(max = 720.dp).fillMaxWidth(),
     ) {
         item {
             Text(

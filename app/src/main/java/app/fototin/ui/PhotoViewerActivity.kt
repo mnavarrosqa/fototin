@@ -6,7 +6,17 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -76,6 +86,56 @@ class PhotoViewerActivity : ComponentActivity() {
         }
         val start = photos.indexOfFirst { it.id == startId }.coerceAtLeast(0)
         val pager = rememberPagerState(initialPage = start) { photos.size }
+        val fold = rememberFoldingFeature()
+        val hinge = fold?.takeIf { it.isTabletop }?.hingeDp()
+
+        if (hinge != null) {
+            // Modo mesa: la foto arriba de la bisagra y los controles en la mitad apoyada.
+            val scope = rememberCoroutineScope()
+            Column(Modifier.fillMaxSize()) {
+                HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(hinge.first)) { page ->
+                    AsyncImage(
+                        model = photos[page].file,
+                        contentDescription = "Foto del ${PhotoPool.formatDate(photos[page].takenAt)}",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+                    )
+                }
+                Spacer(Modifier.height(hinge.second - hinge.first))
+                Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    val photo = photos[pager.currentPage]
+                    Text(
+                        PhotoPool.caption(photo, source, showText = true) ?: "",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineSmall,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${pager.currentPage + 1} de ${photos.size}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FilledTonalButton(
+                            onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
+                            enabled = pager.currentPage > 0,
+                        ) { Text("Anterior") }
+                        FilledTonalButton(
+                            onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
+                            enabled = pager.currentPage < photos.size - 1,
+                        ) { Text("Siguiente") }
+                    }
+                }
+            }
+            return
+        }
+
         HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
             val photo = photos[page]
             Box(Modifier.fillMaxSize()) {

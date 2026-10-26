@@ -35,6 +35,9 @@ tenés puestos y para agregar nuevos) y **Ajustes** (rotación, copia de segurid
 - **Sin repetidas:** al importar se reconocen las fotos que ya estaban.
 - **Copia de seguridad:** guardá todas las fotos, notas y álbumes en un .zip y restauralas en
   otro teléfono o después de reinstalar (se suman a lo que ya hay, sin repetir).
+- **Preparada para foldables:** desplegada usa una barra lateral y el detalle de cada foto se
+  divide en dos paneles justo en la bisagra; en modo mesa, el visor muestra la foto arriba y los
+  controles abajo. El collage pasa a fila o columna en widgets muy anchos o angostos.
 - **Administrar fotos:** mantené presionada una foto para seleccionar varias y sumarlas a un
   álbum, sacarlas de él o borrarlas de Fototin (las originales no se tocan).
 
