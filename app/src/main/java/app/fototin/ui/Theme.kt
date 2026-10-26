@@ -102,13 +102,14 @@ private val AppShapes = Shapes(
  */
 @Composable
 fun FototinTheme(
-    dynamicColor: Boolean = remember { Settings(LocalContextCompose.current).dynamicColor },
+    dynamicColor: Boolean? = null,
     content: @Composable () -> Unit,
 ) {
     val dark = isSystemInDarkTheme()
     val context = LocalContextCompose.current
+    val useDynamic = dynamicColor ?: remember(context) { Settings(context).dynamicColor }
     val colors = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+        useDynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         dark -> Dark
         else -> Light
