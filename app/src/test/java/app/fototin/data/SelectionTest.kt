@@ -66,5 +66,37 @@ class SelectionTest {
         assertEquals(listOf("d", "b", "a"), chosen.map { it.id })
     }
 
+    @Test
+    fun `cambiar de a una reemplaza un solo lugar y va rotando`() {
+        val (first, slot, _) = rotateOne(ids, listOf("a", "b", "c"), 0, emptySet(), shuffle = false)
+        // En orden: "a" pasa a la siguiente que no está en el collage.
+        assertEquals(listOf("d", "b", "c"), first)
+        assertEquals(1, slot)
+        val (second, nextSlot, _) = rotateOne(ids, first, slot, emptySet(), shuffle = false)
+        assertEquals(listOf("d", "e", "c"), second)
+        assertEquals(2, nextSlot)
+    }
+
+    @Test
+    fun `cambiar de a una nunca repite una foto que ya esta en el collage`() {
+        val random = Random(3)
+        var current = listOf("a", "b", "c")
+        var slot = 0
+        var seen = emptySet<String>()
+        repeat(30) {
+            val (next, nextSlot, nextSeen) = rotateOne(ids, current, slot, seen, shuffle = true, random = random)
+            assertEquals(3, next.toSet().size)
+            current = next
+            slot = nextSlot
+            seen = nextSeen
+        }
+    }
+
+    @Test
+    fun `sin fotos de sobra el collage queda igual`() {
+        val (same, _, _) = rotateOne(listOf("a", "b"), listOf("a", "b"), 0, emptySet(), shuffle = true)
+        assertEquals(listOf("a", "b"), same)
+    }
+
     private fun photo(id: String) = Photo(id, File("$id.jpg"), File("t$id.jpg"), 100, 100, 0L)
 }

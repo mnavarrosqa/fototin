@@ -63,6 +63,8 @@ import app.fototin.data.PhotoPool
 import app.fototin.data.WidgetSource
 import app.fototin.data.collageSelection
 import app.fototin.ui.FototinTheme
+import app.fototin.widget.CollageStyle
+import app.fototin.widget.CollageStyler
 import app.fototin.widget.CollageWidget
 import app.fototin.widget.CollageWidgetReceiver
 import app.fototin.widget.FotoWidget
@@ -83,6 +85,8 @@ private data class Choice(
     val showDate: Boolean,
     val tap: TapAction,
     val count: Int,
+    val collageStyle: CollageStyle,
+    val rotateOne: Boolean,
 )
 
 /** Se abre al agregar (o reconfigurar) un widget de foto o un collage. */
@@ -120,6 +124,8 @@ class WidgetConfigActivity : ComponentActivity() {
                 showDate = prefs[WidgetKeys.SHOW_DATE] ?: false,
                 tap = TapAction.from(prefs[WidgetKeys.TAP]),
                 count = prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT,
+                collageStyle = CollageStyle.from(prefs[WidgetKeys.COLLAGE_STYLE]),
+                rotateOne = prefs[WidgetKeys.ROTATE_ONE] ?: false,
             )
 
             setContent {
@@ -144,7 +150,9 @@ class WidgetConfigActivity : ComponentActivity() {
                 it[WidgetKeys.STYLE] = choice.style.name
                 it[WidgetKeys.SHOW_DATE] = choice.showDate
                 it[WidgetKeys.TAP] = choice.tap.name
-                it[WidgetKeys.COUNT] = choice.count
+                it[WidgetKeys.COUNT] = choice.collageStyle.clampCount(choice.count)
+                it[WidgetKeys.COLLAGE_STYLE] = choice.collageStyle.name
+                it[WidgetKeys.ROTATE_ONE] = choice.rotateOne
             }
             if (isCollage) {
                 CollageWidget().update(this@WidgetConfigActivity, glanceId)
@@ -170,14 +178,17 @@ class WidgetConfigActivity : ComponentActivity() {
         var style by remember { mutableStateOf(initial.style) }
         var showDate by remember { mutableStateOf(initial.showDate) }
         var tap by remember { mutableStateOf(initial.tap) }
-        var count by remember { mutableIntStateOf(initial.count) }
+        var collageStyle by remember { mutableStateOf(initial.collageStyle) }
+        var count by remember { mutableIntStateOf(initial.collageStyle.clampCount(initial.count)) }
+        var rotateOne by remember { mutableStateOf(initial.rotateOne) }
 
         // Las fotos que el widget muestra ahora, si siguen entre las elegidas: la vista previa es fiel.
         val photos by produceState<List<Photo>>(emptyList(), source, count) {
             value = withContext(Dispatchers.IO) {
                 val pool = PhotoPool.resolve(this@WidgetConfigActivity, source)
                 if (isCollage) {
-                    collageSelection(pool, currentCollageIds, count)
+                    // Para las vistas previas de todos los diseños hacen falta hasta 6 fotos.
+                    collageSelection(pool, currentCollageIds, 6)
                 } else {
                     listOfNotNull(pool.firstOrNull { it.id == currentPhotoId } ?: pool.lastOrNull())
                 }
@@ -188,13 +199,29 @@ class WidgetConfigActivity : ComponentActivity() {
             value = withContext(Dispatchers.IO) { photos.mapNotNull { WidgetSupport.load(it, 720) } }
         }
         val caption = photos.firstOrNull()?.let { PhotoPool.caption(it, source, showDate) }
+        val captions = photos.map { PhotoPool.caption(it, source, showDate) }
+        val seed = CollageWidget.seedOf(photos)
         val corner = WidgetSupport.launcherCornerDp(this, fallback = if (isCollage) 20f else 28f)
-        val large by produceState<Bitmap?>(null, sources, style, caption) {
+        val large by produceState<Bitmap?>(null, sources, style, caption, collageStyle, count, captions) {
             value = withContext(Dispatchers.Default) {
                 when {
                     sources.isEmpty() -> null
-                    isCollage -> PhotoStyler.renderCollage(sources, 900, 450, 900f / COLLAGE_PREVIEW_DP, corner)
+                    isCollage -> CollageStyler.render(
+                        sources.take(count), collageStyle, 900, 450, 900f / COLLAGE_PREVIEW_DP, corner, captions.take(count), seed,
+                    )
                     else -> PhotoStyler.render(sources.first(), style, 720, 720, 720f / PREVIEW_DP, caption, corner)
+                }
+            }
+        }
+        val collageThumbs by produceState<Map<CollageStyle, Bitmap>>(emptyMap(), sources, count) {
+            value = if (!isCollage || sources.isEmpty()) {
+                emptyMap()
+            } else {
+                withContext(Dispatchers.Default) {
+                    CollageStyle.entries.associateWith {
+                        val n = it.clampCount(count)
+                        CollageStyler.render(sources.take(n), it, 320, 200, 320f / COLLAGE_PREVIEW_DP * 2f, corner, seed = seed)
+                    }
                 }
             }
         }
@@ -225,8 +252,50 @@ class WidgetConfigActivity : ComponentActivity() {
                     Spacer(Modifier.height(16.dp))
 
                     if (isCollage) {
+                        Label("Diseño")
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(CollageStyle.entries) { option ->
+                                OptionCard(
+                                    label = option.label,
+                                    preview = collageThumbs[option],
+                                    selected = option == collageStyle,
+                                    wide = true,
+                                    onClick = {
+                                        collageStyle = option
+                                        count = option.clampCount(count)
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
                         Label("Cantidad de fotos")
-                        ChipRow(CollageWidget.COUNT_OPTIONS, count, { "$it fotos" }, { count = it })
+                        ChipRow(collageStyle.counts.toList(), count, { "$it fotos" }, { count = it })
+                        Spacer(Modifier.height(16.dp))
+                        Label("Al tocar el widget")
+                        ChipRow(
+                            TapAction.entries,
+                            tap,
+                            { if (it == TapAction.NEXT) "Cambiar fotos" else it.label },
+                            { tap = it },
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        ToggleRow(
+                            title = "Cambiar de a una",
+                            subtitle = "En vez de cambiar todas juntas, se reemplaza una foto por vez",
+                            checked = rotateOne,
+                            onChange = { rotateOne = it },
+                        )
+                        if (source != WidgetSource.Memories) {
+                            ToggleRow(
+                                title = "Mostrar nota o fecha",
+                                subtitle = "En cada foto, si entra",
+                                checked = showDate,
+                                onChange = { showDate = it },
+                            )
+                        }
                     } else {
                         Label("Estilo")
                         LazyRow(
@@ -261,7 +330,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { onSave(Choice(source, style, showDate, tap, count)) },
+                    onClick = { onSave(Choice(source, style, showDate, tap, count, collageStyle, rotateOne)) },
                     modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(52.dp),
                 ) {
                     Text("Listo")
@@ -356,7 +425,25 @@ class WidgetConfigActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun StyleOption(style: WidgetStyle, preview: Bitmap?, selected: Boolean, onClick: () -> Unit) {
+    private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = checked, onCheckedChange = onChange)
+        }
+    }
+
+    @Composable
+    private fun StyleOption(style: WidgetStyle, preview: Bitmap?, selected: Boolean, onClick: () -> Unit) =
+        OptionCard(style.label, preview, selected, wide = false, onClick = onClick)
+
+    @Composable
+    private fun OptionCard(label: String, preview: Bitmap?, selected: Boolean, wide: Boolean, onClick: () -> Unit) {
         OutlinedCard(
             onClick = onClick,
             shape = RoundedCornerShape(20.dp),
@@ -367,11 +454,11 @@ class WidgetConfigActivity : ComponentActivity() {
                 if (selected) 2.dp else 1.dp,
                 if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
             ),
-            modifier = Modifier.width(96.dp),
+            modifier = Modifier.width(if (wide) 140.dp else 96.dp),
         ) {
             Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(76.dp).background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp)),
+                    Modifier.width(if (wide) 120.dp else 76.dp).height(76.dp).background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (preview != null) {
@@ -379,7 +466,7 @@ class WidgetConfigActivity : ComponentActivity() {
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(style.label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
             }
         }
     }

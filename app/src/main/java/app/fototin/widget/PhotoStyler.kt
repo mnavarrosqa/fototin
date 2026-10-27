@@ -29,10 +29,7 @@ object PhotoStyler {
     /** Límite del lado más largo para no superar la memoria permitida a los widgets. */
     private const val MAX_OUTPUT_PX = 900
 
-    private const val SHADOW = 0x40000000
-
-    /** Proporción a partir de la cual el collage pasa a una sola fila o columna. */
-    private const val STRIP_ASPECT = 2.4f
+    internal const val SHADOW = 0x40000000
 
     /**
      * @param caption texto opcional (por ejemplo, la fecha) que se dibuja sobre la foto o,
@@ -112,78 +109,9 @@ object PhotoStyler {
         return out
     }
 
-    /**
-     * Collage de 1 a 4 fotos. La distribución se adapta a la forma del widget: en uno ancho la foto
-     * principal va a la izquierda, en uno alto va arriba.
-     */
-    fun renderCollage(
-        sources: List<StyledSource>,
-        widthPx: Int,
-        heightPx: Int,
-        density: Float,
-        cornerDp: Float = 20f,
-    ): Bitmap {
-        val (out, canvas, dp) = canvasFor(widthPx, heightPx, density)
-        val bounds = RectF(0f, 0f, out.width.toFloat(), out.height.toFloat())
-        val gap = 4 * dp
-        val wide = bounds.width() >= bounds.height()
-        val aspect = bounds.width() / bounds.height()
-        val cells = when {
-            // Muy ancho o muy angosto (pantallas externas de foldables, launchers desplegados):
-            // todas en fila o en columna, que en esas formas se ven mejor que en grilla.
-            sources.size > 1 && aspect >= STRIP_ASPECT -> strip(bounds, sources.size, gap, horizontal = true)
-            sources.size > 1 && aspect <= 1f / STRIP_ASPECT -> strip(bounds, sources.size, gap, horizontal = false)
-            else -> gridCells(bounds, sources.size, gap, wide)
-        }
-        // Las esquinas exteriores siguen el radio del launcher; las interiores son más chicas.
-        val outer = cornerDp * dp
-        val inner = 8 * dp
-        cells.zip(sources).forEach { (cell, source) ->
-            val left = cell.left == bounds.left
-            val top = cell.top == bounds.top
-            val right = cell.right == bounds.right
-            val bottom = cell.bottom == bounds.bottom
-            fun corner(isOuter: Boolean) = if (isOuter) outer else inner
-            drawPhoto(
-                canvas, source, cell,
-                roundRect(cell, corner(left && top), corner(right && top), corner(right && bottom), corner(left && bottom)),
-            )
-        }
-        return out
-    }
+    internal data class Target(val bitmap: Bitmap, val canvas: Canvas, val dp: Float)
 
-    /** Distribución en grilla para 1 a 4 fotos según si el widget es ancho o alto. */
-    private fun gridCells(bounds: RectF, count: Int, gap: Float, wide: Boolean): List<RectF> = when (count) {
-        0 -> emptyList()
-        1 -> listOf(bounds)
-        2 -> split(bounds, gap, horizontal = wide)
-        3 -> {
-            val (main, rest) = split(bounds, gap, horizontal = wide)
-            listOf(main) + split(rest, gap, horizontal = !wide)
-        }
-        else -> {
-            val (a, b) = split(bounds, gap, horizontal = false)
-            split(a, gap, horizontal = true) + split(b, gap, horizontal = true)
-        }
-    }
-
-    /** [count] celdas iguales una al lado de la otra (o una debajo de la otra). */
-    private fun strip(bounds: RectF, count: Int, gap: Float, horizontal: Boolean): List<RectF> {
-        val total = (if (horizontal) bounds.width() else bounds.height()) - gap * (count - 1)
-        val size = total / count
-        return List(count) { i ->
-            val start = (if (horizontal) bounds.left else bounds.top) + i * (size + gap)
-            if (horizontal) {
-                RectF(start, bounds.top, if (i == count - 1) bounds.right else start + size, bounds.bottom)
-            } else {
-                RectF(bounds.left, start, bounds.right, if (i == count - 1) bounds.bottom else start + size)
-            }
-        }
-    }
-
-    private data class Target(val bitmap: Bitmap, val canvas: Canvas, val dp: Float)
-
-    private fun canvasFor(widthPx: Int, heightPx: Int, density: Float): Target {
+    internal fun canvasFor(widthPx: Int, heightPx: Int, density: Float): Target {
         val fit = min(1f, MAX_OUTPUT_PX.toFloat() / max(widthPx, heightPx).coerceAtLeast(1))
         val w = (widthPx * fit).toInt().coerceAtLeast(1)
         val h = (heightPx * fit).toInt().coerceAtLeast(1)
@@ -191,7 +119,7 @@ object PhotoStyler {
         return Target(bitmap, Canvas(bitmap), density * fit)
     }
 
-    private fun split(rect: RectF, gap: Float, horizontal: Boolean): List<RectF> =
+    internal fun split(rect: RectF, gap: Float, horizontal: Boolean): List<RectF> =
         if (horizontal) {
             val mid = rect.left + (rect.width() - gap) / 2f
             listOf(RectF(rect.left, rect.top, mid, rect.bottom), RectF(mid + gap, rect.top, rect.right, rect.bottom))
@@ -310,7 +238,7 @@ object PhotoStyler {
         }
     }
 
-    private fun inset(rect: RectF, by: Float) = RectF(rect).apply { inset(by, by) }
+    internal fun inset(rect: RectF, by: Float) = RectF(rect).apply { inset(by, by) }
 
     /** Área centrada dentro de [bounds] que no es más ancha que [maxAspect] veces su alto. */
     private fun centeredArea(bounds: RectF, maxAspect: Float): RectF {
@@ -321,7 +249,7 @@ object PhotoStyler {
     }
 
     /** Radios de las esquinas en orden: arriba-izq., arriba-der., abajo-der., abajo-izq. */
-    private fun roundRect(rect: RectF, tl: Float, tr: Float = tl, br: Float = tl, bl: Float = tr): Path =
+    internal fun roundRect(rect: RectF, tl: Float, tr: Float = tl, br: Float = tl, bl: Float = tr): Path =
         Path().apply {
             addRoundRect(rect, floatArrayOf(tl, tl, tr, tr, br, br, bl, bl), Path.Direction.CW)
         }
@@ -345,7 +273,7 @@ object PhotoStyler {
      * Dibuja la foto recortada para cubrir [dst], con la forma de [shape], centrando el recorte en
      * el punto de foco de la foto sin dejar huecos.
      */
-    private fun drawPhoto(canvas: Canvas, source: StyledSource, dst: RectF, shape: Path, shadow: Float = 0f) {
+    internal fun drawPhoto(canvas: Canvas, source: StyledSource, dst: RectF, shape: Path, shadow: Float = 0f) {
         if (shadow > 0f) canvas.drawPath(shape, shadowPaint(Color.WHITE, shadow))
         val src = source.bitmap
         val scale = max(dst.width() / src.width, dst.height() / src.height)
@@ -367,7 +295,7 @@ object PhotoStyler {
     }
 
     /** Etiqueta translúcida sobre la foto. */
-    private fun drawPill(canvas: Canvas, text: String, area: RectF, dp: Float, centered: Boolean) {
+    internal fun drawPill(canvas: Canvas, text: String, area: RectF, dp: Float, centered: Boolean) {
         val paint = textPaint(Color.WHITE, Typeface.create("sans-serif-medium", Typeface.NORMAL)).apply {
             textSize = 11.5f * dp
         }
@@ -384,12 +312,12 @@ object PhotoStyler {
         canvas.drawText(text, pill.left + padH, baseline, paint)
     }
 
-    private fun shadowPaint(fill: Int, dp: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    internal fun shadowPaint(fill: Int, dp: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = fill
         setShadowLayer(4 * dp, 0f, 1.5f * dp, SHADOW)
     }
 
-    private fun textPaint(color: Int, typeface: Typeface) =
+    internal fun textPaint(color: Int, typeface: Typeface) =
         Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             this.color = color
             this.typeface = typeface

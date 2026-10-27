@@ -22,7 +22,9 @@ tenés puestos y para agregar nuevos) y **Ajustes** (rotación, copia de segurid
 - **Widget de foto con 10 estilos:** Redondeado (con las esquinas del launcher), Polaroid, Washi,
   Arco, Círculo, Corazón, Pétalo, Estampilla, Marco y Borde a borde, con la fecha opcional.
   Al tocarlo pasa a la siguiente foto, la abre en grande o abre la app, según se elija.
-- **Widget Collage** con 2, 3 o 4 fotos que se acomodan según la forma del widget.
+- **Widget Collage** con 2 a 6 fotos y 5 diseños: Mosaico, Revista, Polaroids desparramadas,
+  Fotomatón y Película. Puede cambiar todas las fotos juntas o de a una, mostrar nota o fecha y
+  elegir qué pasa al tocarlo.
 - **Encuadre inteligente:** al importar se detectan las caras para que el recorte no las corte.
 - Cada widget se configura al agregarlo y se puede reconfigurar manteniéndolo presionado.
 - **Rotación automática** cada 15 min, 1 h, 6 h o 1 día. En orden aleatorio no se repite

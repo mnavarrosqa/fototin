@@ -46,6 +46,12 @@ object WidgetKeys {
     val TAP = stringPreferencesKey("tap")
     /** Cantidad de fotos del collage. */
     val COUNT = intPreferencesKey("count")
+    /** Diseño del collage ([CollageStyle]). */
+    val COLLAGE_STYLE = stringPreferencesKey("collage_style")
+    /** Cambiar las fotos del collage de a una en vez de todas juntas. */
+    val ROTATE_ONE = booleanPreferencesKey("rotate_one")
+    /** Próximo lugar del collage a cambiar cuando se cambia de a una. */
+    val SLOT = intPreferencesKey("slot")
 }
 
 object WidgetSupport {
@@ -85,9 +91,11 @@ object WidgetSupport {
                 val preview = if (pool.isEmpty()) {
                     null
                 } else if (collage) {
-                    val photos = collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT)
+                    val style = CollageStyle.from(prefs[WidgetKeys.COLLAGE_STYLE])
+                    val photos = collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], style.clampCount(prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT))
                     val sources = photos.mapNotNull { load(it, PREVIEW_PX / 2) }
-                    PhotoStyler.renderCollage(sources, w, h, scale, launcherCornerDp(context, 20f))
+                    val captions = photos.map { PhotoPool.caption(it, source, prefs[WidgetKeys.SHOW_DATE] ?: false) }
+                    CollageStyler.render(sources, style, w, h, scale, launcherCornerDp(context, 20f), captions, CollageWidget.seedOf(photos))
                         .also { sources.forEach { s -> s.bitmap.recycle() } }
                 } else {
                     val photo = pool.firstOrNull { it.id == prefs[WidgetKeys.PHOTO_ID] } ?: pool.first()
@@ -103,7 +111,11 @@ object WidgetSupport {
                     WidgetSource.Favorites -> "Favoritas"
                     is WidgetSource.FromAlbum -> albums.firstOrNull { it.id == source.albumId }?.name ?: "Todas"
                 }
-                val title = if (collage) "Collage" else WidgetStyle.from(prefs[WidgetKeys.STYLE]).label
+                val title = if (collage) {
+                    "Collage " + CollageStyle.from(prefs[WidgetKeys.COLLAGE_STYLE]).label.lowercase()
+                } else {
+                    WidgetStyle.from(prefs[WidgetKeys.STYLE]).label
+                }
                 PlacedWidget(appWidgetId, glanceId, collage, preview, "$title · $sourceName")
             }
         }

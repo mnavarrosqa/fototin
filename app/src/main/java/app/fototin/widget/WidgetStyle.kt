@@ -27,3 +27,18 @@ enum class TapAction(val label: String) {
         fun from(name: String?): TapAction = entries.firstOrNull { it.name == name } ?: NEXT
     }
 }
+
+/** Diseños del widget Collage, con cuántas fotos admite cada uno. */
+enum class CollageStyle(val label: String, val counts: IntRange) {
+    MOSAIC("Mosaico", 2..6),
+    MAGAZINE("Revista", 3..5),
+    POLAROIDS("Polaroids", 2..5),
+    PHOTOBOOTH("Fotomatón", 3..4),
+    FILM("Película", 3..5);
+
+    fun clampCount(count: Int): Int = count.coerceIn(counts)
+
+    companion object {
+        fun from(name: String?): CollageStyle = entries.firstOrNull { it.name == name } ?: MOSAIC
+    }
+}
