@@ -815,11 +815,10 @@ private val GRID_GAP = 2.dp
 
 private fun photoCount(count: Int) = if (count == 1) "1 foto" else "$count fotos"
 
-/** «128 fotos · 2019 – 2025», o una ayuda para elegir varias si todavía son pocas. */
+/** «128 fotos · 2019 – 2025». */
 private fun headerSubtitle(visible: List<Photo>, sortByTaken: Boolean): String? {
     if (visible.isEmpty()) return null
     val count = photoCount(visible.size)
-    if (visible.size < 12) return "$count · mantené presionada una para elegir varias"
     if (!sortByTaken) return count
     val years = visible.map { yearOf(it.takenAt) }
     val first = years.min()
