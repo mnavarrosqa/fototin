@@ -109,9 +109,8 @@ fun SettingsTab(
         item {
             Text(
                 "Ajustes",
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
             )
         }
 

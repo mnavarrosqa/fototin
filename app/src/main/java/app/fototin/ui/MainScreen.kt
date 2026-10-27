@@ -115,9 +115,24 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 /** Diálogo abierto en la pantalla principal. */
 private sealed interface Dialog {
@@ -173,6 +188,7 @@ fun MainScreen(
     val whatsNew by viewModel.whatsNew.collectAsState()
     val checkingUpdates by viewModel.checkingUpdates.collectAsState()
     val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
+    val favoritesOnly by viewModel.favoritesOnly.collectAsState()
     var addMenu by remember { mutableStateOf(false) }
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
@@ -202,7 +218,7 @@ fun MainScreen(
 
     val selecting = selection.isNotEmpty()
     // Atrás: primero cancela la selección, después vuelve a Fotos y por último sale del álbum.
-    BackHandler(enabled = selecting || tab != Tab.PHOTOS || currentAlbum != null) {
+    BackHandler(enabled = selecting || tab != Tab.PHOTOS || currentAlbum != null || favoritesOnly) {
         when {
             selecting -> viewModel.clearSelection()
             tab != Tab.PHOTOS -> tab = Tab.PHOTOS
@@ -212,6 +228,26 @@ fun MainScreen(
 
     val gridState = rememberLazyStaggeredGridState()
     val atTop by remember { derivedStateOf { gridState.firstVisibleItemIndex == 0 } }
+    val scope = rememberCoroutineScope()
+    // Tocar «Fotos» estando en Fotos vuelve al principio, como en las apps de galería.
+    val selectTab: (Tab) -> Unit = { item ->
+        if (item == tab && item == Tab.PHOTOS) scope.launch { gridState.animateScrollToItem(0) }
+        tab = item
+    }
+    val addMenuContent: @Composable () -> Unit = {
+        AddMenu(
+            expanded = addMenu,
+            onDismiss = { addMenu = false },
+            onPickPhotos = {
+                addMenu = false
+                onPickPhotos()
+            },
+            onPickGooglePhotos = {
+                addMenu = false
+                onPickGooglePhotos()
+            },
+        )
+    }
 
     // Desplegado o en tablet, las pestañas pasan a una barra lateral.
     val wide = isWideScreen()
@@ -228,7 +264,7 @@ fun MainScreen(
                     Tab.entries.forEach { item ->
                         NavigationRailItem(
                             selected = tab == item,
-                            onClick = { tab = item },
+                            onClick = { selectTab(item) },
                             icon = { TabIcon(item) },
                             label = { Text(item.label) },
                         )
@@ -239,7 +275,8 @@ fun MainScreen(
         }
         Scaffold(
             modifier = Modifier.weight(1f),
-            snackbarHost = { SnackbarHost(snackbar) },
+            // En el teléfono, los avisos aparecen arriba de la barra flotante.
+            snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = if (wide) 0.dp else 84.dp)) },
             topBar = {
                 AnimatedVisibility(visible = selecting, enter = fadeIn(), exit = fadeOut()) {
                     TopAppBar(
@@ -271,52 +308,26 @@ fun MainScreen(
                     )
                 }
             },
-            bottomBar = {
-                AnimatedVisibility(visible = !selecting && !wide, enter = fadeIn(), exit = fadeOut()) {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                        Tab.entries.forEach { item ->
-                            NavigationBarItem(
-                                selected = tab == item,
-                                onClick = { tab = item },
-                                icon = { TabIcon(item) },
-                                label = { Text(item.label) },
-                            )
-                        }
-                    }
-                }
-            },
             floatingActionButton = {
-                AnimatedVisibility(visible = tab == Tab.PHOTOS && !selecting, enter = scaleIn(), exit = scaleOut()) {
-                    // De dónde agregar: el selector del teléfono o Google Fotos.
+                // En el teléfono el botón + va en la barra flotante; acá solo en pantallas anchas.
+                AnimatedVisibility(visible = wide && tab == Tab.PHOTOS && !selecting, enter = scaleIn(), exit = scaleOut()) {
                     Box {
-                    DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Desde el teléfono") },
-                            leadingIcon = { Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null) },
-                            onClick = {
-                                addMenu = false
-                                onPickPhotos()
-                            },
+                        addMenuContent()
+                        ExtendedFloatingActionButton(
+                            onClick = { addMenu = true },
+                            expanded = atTop || visible.isEmpty(),
+                            icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                            text = { Text(if (currentAlbum != null) "Agregar al álbum" else "Agregar fotos") },
                         )
-                        DropdownMenuItem(
-                            text = { Text("Desde Google Fotos") },
-                            leadingIcon = { Icon(painterResource(R.drawable.ic_cloud), contentDescription = null) },
-                            onClick = {
-                                addMenu = false
-                                onPickGooglePhotos()
-                            },
-                        )
-                    }
-                    ExtendedFloatingActionButton(
-                        onClick = { addMenu = true },
-                        expanded = atTop || visible.isEmpty(),
-                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                        text = { Text(if (currentAlbum != null) "Agregar al álbum" else "Agregar fotos") },
-                    )
                     }
                 }
             },
-        ) { padding ->
+        ) { scaffoldPadding ->
+            // Lugar para la barra flotante, que se dibuja encima del contenido.
+            val padding = PaddingValues(
+                top = scaffoldPadding.calculateTopPadding(),
+                bottom = scaffoldPadding.calculateBottomPadding() + if (wide || selecting) 0.dp else FLOATING_BAR_SPACE,
+            )
             Crossfade(tab, label = "tab") { current ->
                 when (current) {
                     Tab.PHOTOS -> PhotosTab(
@@ -326,6 +337,7 @@ fun MainScreen(
                         visible = visible,
                         albums = albums,
                         currentAlbum = currentAlbum,
+                        favoritesOnly = favoritesOnly,
                         memories = memories,
                         importing = importing,
                         googlePhotos = googlePhotos,
@@ -341,6 +353,7 @@ fun MainScreen(
                         onPickPhotos = onPickPhotos,
                         onGoToWidgets = { tab = Tab.WIDGETS },
                         onOpenAlbum = viewModel::openAlbum,
+                        onOpenFavorites = viewModel::openFavorites,
                         onNewAlbum = { dialog = Dialog.NewAlbum },
                         onSort = viewModel::setSortByTaken,
                         onGridSize = viewModel::setGridSize,
@@ -393,6 +406,23 @@ fun MainScreen(
             }
         }
 
+        }
+
+        if (!wide) {
+            AnimatedVisibility(
+                visible = !selecting,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp),
+            ) {
+                FloatingTabBar(
+                    current = tab,
+                    onSelect = selectTab,
+                    showAdd = tab == Tab.PHOTOS,
+                    onAdd = { addMenu = true },
+                    addMenu = addMenuContent,
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -489,11 +519,106 @@ fun MainScreen(
 }
 
 @Composable
-private fun TabIcon(tab: Tab) {
+private fun TabIcon(tab: Tab, contentDescription: String? = null) {
     when (tab) {
-        Tab.PHOTOS -> Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null)
-        Tab.WIDGETS -> Icon(painterResource(R.drawable.ic_tab_widgets), contentDescription = null)
-        Tab.SETTINGS -> Icon(Icons.Filled.Settings, contentDescription = null)
+        Tab.PHOTOS -> Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = contentDescription)
+        Tab.WIDGETS -> Icon(painterResource(R.drawable.ic_tab_widgets), contentDescription = contentDescription)
+        Tab.SETTINGS -> Icon(Icons.Filled.Settings, contentDescription = contentDescription)
+    }
+}
+
+/** Alto que ocupa la barra flotante (con su margen), para que el contenido no quede tapado. */
+private val FLOATING_BAR_SPACE = 84.dp
+
+/** De dónde agregar: el selector del teléfono o Google Fotos. */
+@Composable
+private fun AddMenu(expanded: Boolean, onDismiss: () -> Unit, onPickPhotos: () -> Unit, onPickGooglePhotos: () -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text("Desde el teléfono") },
+            leadingIcon = { Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null) },
+            onClick = onPickPhotos,
+        )
+        DropdownMenuItem(
+            text = { Text("Desde Google Fotos") },
+            leadingIcon = { Icon(painterResource(R.drawable.ic_cloud), contentDescription = null) },
+            onClick = onPickGooglePhotos,
+        )
+    }
+}
+
+/**
+ * Pestañas en una píldora que flota sobre las fotos, con el botón + al lado, como en las
+ * galerías actuales: las fotos llegan hasta el borde y la barra no les quita lugar.
+ */
+@Composable
+private fun FloatingTabBar(
+    current: Tab,
+    onSelect: (Tab) -> Unit,
+    showAdd: Boolean,
+    onAdd: () -> Unit,
+    addMenu: @Composable () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f),
+            shadowElevation = 10.dp,
+        ) {
+            Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Tab.entries.forEach { item ->
+                    TabPill(item, selected = item == current, onClick = { onSelect(item) })
+                }
+            }
+        }
+        AnimatedVisibility(visible = showAdd, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+            Box {
+                Surface(
+                    onClick = onAdd,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.size(60.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Add, contentDescription = "Agregar fotos", modifier = Modifier.size(28.dp))
+                    }
+                }
+                addMenu()
+            }
+        }
+    }
+}
+
+/** Una pestaña: solo el ícono, o el ícono con su nombre cuando está elegida. */
+@Composable
+private fun TabPill(tab: Tab, selected: Boolean, onClick: () -> Unit) {
+    val background by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        label = "tabBackground",
+    )
+    val content by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = "tabContent",
+    )
+    Row(
+        Modifier
+            .height(48.dp)
+            .clip(CircleShape)
+            .background(background)
+            .selectable(selected = selected, onClick = onClick, role = Role.Tab)
+            .padding(horizontal = 18.dp)
+            .animateContentSize(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides content) {
+            TabIcon(tab, contentDescription = if (selected) null else tab.label)
+        }
+        if (selected) {
+            Spacer(Modifier.width(8.dp))
+            Text(tab.label, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
+        }
     }
 }
 
@@ -505,6 +630,7 @@ private fun PhotosTab(
     visible: List<Photo>,
     albums: List<Album>,
     currentAlbum: Album?,
+    favoritesOnly: Boolean,
     memories: List<Photo>,
     importing: ImportProgress?,
     googlePhotos: String?,
@@ -520,6 +646,7 @@ private fun PhotosTab(
     onPickPhotos: () -> Unit,
     onGoToWidgets: () -> Unit,
     onOpenAlbum: (String?) -> Unit,
+    onOpenFavorites: () -> Unit,
     onNewAlbum: () -> Unit,
     onSort: (Boolean) -> Unit,
     onGridSize: (Int) -> Unit,
@@ -530,259 +657,435 @@ private fun PhotosTab(
     onSlideshow: (List<Photo>, WidgetSource) -> Unit,
 ) {
     val selecting = selection.isNotEmpty()
-    LazyVerticalStaggeredGrid(
-        state = gridState,
-        columns = StaggeredGridCells.Adaptive(GRID_SIZES[gridSize.coerceIn(GRID_SIZES.indices)]),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
-            top = padding.calculateTopPadding() + 8.dp,
-            bottom = padding.calculateBottomPadding() + 88.dp,
-        ),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalItemSpacing = 8.dp,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        if (!selecting) {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                Text(
-                    "Fototin",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-            if (memories.isNotEmpty()) {
+    val title = when {
+        favoritesOnly -> "Favoritas"
+        currentAlbum != null -> currentAlbum.name
+        photos.isEmpty() -> "Fototin"
+        else -> "Fotos"
+    }
+    val source = when {
+        favoritesOnly -> WidgetSource.Favorites
+        currentAlbum != null -> WidgetSource.FromAlbum(currentAlbum.id)
+        else -> WidgetSource.All
+    }
+    val side = Modifier.padding(horizontal = 16.dp)
+    Box(Modifier.fillMaxSize()) {
+        // Las fotos van de borde a borde, con separaciones finas; los títulos y tarjetas llevan margen.
+        LazyVerticalStaggeredGrid(
+            state = gridState,
+            columns = StaggeredGridCells.Adaptive(GRID_SIZES[gridSize.coerceIn(GRID_SIZES.indices)]),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 16.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(GRID_GAP),
+            verticalItemSpacing = GRID_GAP,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (!selecting) {
                 item(span = StaggeredGridItemSpan.FullLine) {
-                    // Tocar el aviso pasa los recuerdos de hoy como presentación.
-                    MemoriesBanner(memories, onClick = { onSlideshow(memories, WidgetSource.Memories) })
+                    LargeHeader(
+                        title = title,
+                        subtitle = headerSubtitle(visible, sortByTaken),
+                        album = currentAlbum,
+                        showActions = visible.isNotEmpty() || currentAlbum != null,
+                        sortByTaken = sortByTaken,
+                        gridSize = gridSize,
+                        onSort = onSort,
+                        onGridSize = onGridSize,
+                        onRename = onRenameAlbum,
+                        onDelete = onDeleteAlbum,
+                        onSlideshow = { onSlideshow(visible, source) }.takeIf { visible.isNotEmpty() },
+                    )
+                }
+                if (memories.isNotEmpty() && currentAlbum == null && !favoritesOnly) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        // Tocar los recuerdos de hoy los pasa como presentación.
+                        MemoriesHero(memories, onPlay = { onSlideshow(memories, WidgetSource.Memories) }, modifier = side)
+                    }
                 }
             }
-        }
-        if (photos.isNotEmpty()) {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                AlbumRow(
-                    albums = albums,
-                    allCount = photos.size,
-                    current = currentAlbum,
-                    onOpen = onOpenAlbum,
-                    onNew = onNewAlbum,
-                )
-            }
-        }
-        update?.let { state ->
-            item(span = StaggeredGridItemSpan.FullLine) {
-                UpdateBanner(state, onUpdate = onUpdate, onDismiss = onDismissUpdate)
-            }
-        }
-        googlePhotos?.let { status ->
-            item(span = StaggeredGridItemSpan.FullLine) {
-                GooglePhotosStatus(status, onCheck = onCheckGooglePhotos, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos)
-            }
-        }
-        importing?.let { progress ->
-            item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress) }
-        }
-        if (!selecting && photos.isNotEmpty()) {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                SectionTitle(
-                    album = currentAlbum,
-                    count = visible.size,
-                    sortByTaken = sortByTaken,
-                    gridSize = gridSize,
-                    onSort = onSort,
-                    onGridSize = onGridSize,
-                    onRename = onRenameAlbum,
-                    onDelete = onDeleteAlbum,
-                    onSlideshow = {
-                        onSlideshow(visible, currentAlbum?.let { WidgetSource.FromAlbum(it.id) } ?: WidgetSource.All)
-                    },
-                )
-            }
-        }
-        if (visible.isEmpty() && importing == null) {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                if (currentAlbum == null) GettingStarted(onPickPhotos, onGoToWidgets) else EmptyAlbum()
-            }
-        }
-        // Ordenadas por fecha de la foto, con un separador por año.
-        val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
-        groups.forEach { (year, group) ->
-            if (year != null) {
-                item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
-                    Text(
-                        year.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+            if (photos.isNotEmpty()) {
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    Collections(
+                        photos = photos,
+                        albums = albums,
+                        current = currentAlbum,
+                        favoritesOnly = favoritesOnly,
+                        onOpen = onOpenAlbum,
+                        onFavorites = onOpenFavorites,
+                        onNew = onNewAlbum,
                     )
                 }
             }
-            items(group, key = { it.id }) { photo ->
-                PhotoTile(
-                    photo = photo,
-                    selected = photo.id in selection,
-                    selecting = selecting,
-                    onOpen = { onOpenPhoto(photo.id) },
-                    onToggle = { onToggleSelection(photo.id) },
-                    // Las fotos se acomodan con una animación al borrar, agregar o cambiar el orden.
-                    modifier = Modifier.animateItem(),
-                )
+            update?.let { state ->
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    UpdateBanner(state, onUpdate = onUpdate, onDismiss = onDismissUpdate, modifier = side)
+                }
+            }
+            googlePhotos?.let { status ->
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    GooglePhotosStatus(status, onCheck = onCheckGooglePhotos, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos, modifier = side)
+                }
+            }
+            importing?.let { progress ->
+                item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress, modifier = side) }
+            }
+            if (visible.isEmpty() && importing == null) {
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    when {
+                        favoritesOnly -> EmptyCollection(
+                            "Todavía no tenés favoritas. Abrí una foto y tocá el corazón para sumarla acá.",
+                        )
+                        currentAlbum != null -> EmptyCollection(
+                            "Este álbum está vacío. Tocá + para agregar fotos, o en «Todas» mantené presionadas " +
+                                "algunas y sumalas desde arriba.",
+                        )
+                        else -> Box(side) { GettingStarted(onPickPhotos, onGoToWidgets) }
+                    }
+                }
+            }
+            if (visible.isNotEmpty() && !selecting) {
+                item(span = StaggeredGridItemSpan.FullLine) { Spacer(Modifier.height(8.dp)) }
+            }
+            // Ordenadas por fecha de la foto, con un separador por año.
+            val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
+            groups.forEach { (year, group) ->
+                if (year != null) {
+                    item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
+                        Row(side.padding(top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
+                            Text(year.toString(), style = MaterialTheme.typography.titleLarge)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                photoCount(group.size),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 3.dp),
+                            )
+                        }
+                    }
+                }
+                items(group, key = { it.id }) { photo ->
+                    PhotoTile(
+                        photo = photo,
+                        selected = photo.id in selection,
+                        selecting = selecting,
+                        onOpen = { onOpenPhoto(photo.id) },
+                        onToggle = { onToggleSelection(photo.id) },
+                        // Las fotos se acomodan con una animación al borrar, agregar o cambiar el orden.
+                        modifier = Modifier.animateItem(),
+                    )
+                }
             }
         }
-    }
-}
 
-/** Aviso de recuerdos de hoy, con las fotos apiladas. Al tocarlo abre la primera. */
-@Composable
-private fun MemoriesBanner(memories: List<Photo>, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-    ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            PolaroidStack(memories.take(3))
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (memories.size == 1) "Hoy tenés 1 recuerdo" else "Hoy tenés ${memories.size} recuerdos",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Fotos de un día como hoy en otros años. Elegí «Recuerdos» en un widget para verlas en tu pantalla de inicio.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
-                )
-            }
+        // Al bajar, el título grande pasa a una barra compacta y translúcida. Tocarla vuelve arriba.
+        val collapsed by remember { derivedStateOf { gridState.firstVisibleItemIndex > 0 } }
+        val scope = rememberCoroutineScope()
+        AnimatedVisibility(
+            visible = collapsed && !selecting,
+            enter = fadeIn() + slideInVertically { -it / 2 },
+            exit = fadeOut() + slideOutVertically { -it / 2 },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            CompactHeader(title, onClick = { scope.launch { gridState.animateScrollToItem(0) } })
         }
     }
 }
 
-@Composable
-private fun AlbumRow(
-    albums: List<Album>,
-    allCount: Int,
-    current: Album?,
-    onOpen: (String?) -> Unit,
-    onNew: () -> Unit,
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(top = 8.dp),
-    ) {
-        item {
-            FilterChip(
-                selected = current == null,
-                onClick = { onOpen(null) },
-                label = { Text("Todas · $allCount") },
-            )
-        }
-        rowItems(albums, key = { it.id }) { album ->
-            FilterChip(
-                selected = current?.id == album.id,
-                onClick = { onOpen(album.id) },
-                label = { Text(album.name) },
-            )
-        }
-        item {
-            AssistChip(
-                onClick = onNew,
-                label = { Text("Nuevo álbum") },
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            )
-        }
-    }
+/** Separación entre fotos de la grilla. */
+private val GRID_GAP = 2.dp
+
+private fun photoCount(count: Int) = if (count == 1) "1 foto" else "$count fotos"
+
+/** «128 fotos · 2019 – 2025», o una ayuda para elegir varias si todavía son pocas. */
+private fun headerSubtitle(visible: List<Photo>, sortByTaken: Boolean): String? {
+    if (visible.isEmpty()) return null
+    val count = photoCount(visible.size)
+    if (visible.size < 12) return "$count · mantené presionada una para elegir varias"
+    if (!sortByTaken) return count
+    val years = visible.map { yearOf(it.takenAt) }
+    val first = years.min()
+    val last = years.max()
+    return if (first == last) "$count · $first" else "$count · $first – $last"
 }
 
+/** Título grande en negrita, con la presentación y las opciones a mano. */
 @Composable
-private fun SectionTitle(
+private fun LargeHeader(
+    title: String,
+    subtitle: String?,
     album: Album?,
-    count: Int,
+    showActions: Boolean,
     sortByTaken: Boolean,
     gridSize: Int,
     onSort: (Boolean) -> Unit,
     onGridSize: (Int) -> Unit,
     onRename: (Album) -> Unit,
     onDelete: (Album) -> Unit,
-    onSlideshow: () -> Unit,
+    onSlideshow: (() -> Unit)?,
 ) {
-    Row(Modifier.padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
-            Text(album?.name ?: "Tus fotos", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "$count fotos · mantené presionada una para elegir varias",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        // Orden y opciones del álbum en un solo menú, para no llenar la pantalla de botones.
-        var menu by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { menu = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Opciones")
+            Text(title, style = MaterialTheme.typography.headlineLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            subtitle?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text("Ver presentación") },
-                    leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        onSlideshow()
-                    },
-                )
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("Últimas agregadas") },
-                    trailingIcon = { if (!sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        onSort(false)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Por fecha de la foto") },
-                    trailingIcon = { if (sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        onSort(true)
-                    },
-                )
-                HorizontalDivider()
-                GRID_SIZE_LABELS.forEachIndexed { size, label ->
+        }
+        if (onSlideshow != null) {
+            FilledTonalIconButton(onClick = onSlideshow) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = "Ver presentación")
+            }
+        }
+        if (showActions) {
+            // Orden, tamaño y opciones del álbum en un solo menú, para no llenar la pantalla de botones.
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menu = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Opciones")
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
-                        text = { Text(label) },
-                        trailingIcon = { if (size == gridSize) Icon(Icons.Filled.Check, contentDescription = null) },
+                        text = { Text("Últimas agregadas") },
+                        trailingIcon = { if (!sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
                         onClick = {
                             menu = false
-                            onGridSize(size)
+                            onSort(false)
                         },
                     )
-                }
-                if (album != null) {
+                    DropdownMenuItem(
+                        text = { Text("Por fecha de la foto") },
+                        trailingIcon = { if (sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },
+                        onClick = {
+                            menu = false
+                            onSort(true)
+                        },
+                    )
                     HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("Cambiar nombre del álbum") },
-                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                        onClick = {
-                            menu = false
-                            onRename(album)
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Borrar álbum") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                        onClick = {
-                            menu = false
-                            onDelete(album)
-                        },
-                    )
+                    GRID_SIZE_LABELS.forEachIndexed { size, label ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            trailingIcon = { if (size == gridSize) Icon(Icons.Filled.Check, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                onGridSize(size)
+                            },
+                        )
+                    }
+                    if (album != null) {
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Cambiar nombre del álbum") },
+                            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                onRename(album)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Borrar álbum") },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                onDelete(album)
+                            },
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/** Barra fina que queda arriba al bajar por la grilla. */
+@Composable
+private fun CompactHeader(title: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(Modifier.statusBarsPadding().height(48.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Recuerdos de hoy en grande, con la foto de fondo y el botón para verlos como presentación. */
+@Composable
+private fun MemoriesHero(memories: List<Photo>, onPlay: () -> Unit, modifier: Modifier = Modifier) {
+    val cover = memories.first()
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(228.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .clickable(onClickLabel = "Ver presentación", onClick = onPlay),
+    ) {
+        AsyncImage(
+            model = cover.file,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            // Se recorta respetando las caras, igual que en los widgets.
+            alignment = BiasAlignment(cover.focusX * 2 - 1, cover.focusY * 2 - 1),
+            modifier = Modifier.matchParentSize(),
+        )
+        Box(
+            Modifier.matchParentSize().background(
+                Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.72f)),
+            ),
+        )
+        Row(
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(20.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "RECUERDOS DE HOY",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.85f),
+                    letterSpacing = 1.2.sp,
+                )
+                Text(yearsAgo(memories), style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                Text(photoCount(memories.size), style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f))
+            }
+            Surface(onClick = onPlay, shape = CircleShape, color = Color.White, contentColor = Color.Black, modifier = Modifier.size(52.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Ver presentación", modifier = Modifier.size(28.dp))
+                }
+            }
+        }
+    }
+}
+
+/** «Hace 3 años», o «Hace 1, 4 y 6 años» si hay recuerdos de varios años. */
+private fun yearsAgo(memories: List<Photo>): String {
+    val now = yearOf(System.currentTimeMillis())
+    val ago = memories.map { now - yearOf(it.takenAt) }.filter { it > 0 }.distinct().sorted()
+    return when {
+        ago.isEmpty() -> "Un día como hoy"
+        ago.size == 1 -> if (ago[0] == 1) "Hace 1 año" else "Hace ${ago[0]} años"
+        else -> "Hace ${ago.dropLast(1).joinToString(", ")} y ${ago.last()} años"
+    }
+}
+
+/** Colecciones con portada: todas, favoritas y cada álbum. Elegir una filtra la grilla. */
+@Composable
+private fun Collections(
+    photos: List<Photo>,
+    albums: List<Album>,
+    current: Album?,
+    favoritesOnly: Boolean,
+    onOpen: (String?) -> Unit,
+    onFavorites: () -> Unit,
+    onNew: () -> Unit,
+) {
+    val byId = remember(photos) { photos.associateBy { it.id } }
+    val favorites = remember(photos) { photos.filter { it.favorite } }
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("Colecciones", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, bottom = 10.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "all") {
+                CollectionCard("Todas", photos.size, photos.lastOrNull(), selected = current == null && !favoritesOnly) { onOpen(null) }
+            }
+            if (favorites.isNotEmpty() || favoritesOnly) {
+                item(key = "favorites") {
+                    CollectionCard("Favoritas", favorites.size, favorites.lastOrNull(), selected = favoritesOnly, favorite = true, onClick = onFavorites)
+                }
+            }
+            rowItems(albums, key = { it.id }) { album ->
+                val inAlbum = album.photoIds.mapNotNull { byId[it] }
+                CollectionCard(album.name, inAlbum.size, inAlbum.lastOrNull(), selected = current?.id == album.id) { onOpen(album.id) }
+            }
+            item(key = "new") { NewCollectionCard(onNew) }
+        }
+    }
+}
+
+private val COLLECTION_SIZE = 112.dp
+
+@Composable
+private fun CollectionCard(
+    name: String,
+    count: Int,
+    cover: Photo?,
+    selected: Boolean,
+    favorite: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val border by animateDpAsState(if (selected) 3.dp else 0.dp, label = "collectionBorder")
+    Column(
+        Modifier
+            .width(COLLECTION_SIZE)
+            .clip(RoundedCornerShape(22.dp))
+            .selectable(selected = selected, onClick = onClick, role = Role.Tab),
+    ) {
+        Box(
+            Modifier
+                .size(COLLECTION_SIZE)
+                .clip(RoundedCornerShape(22.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                // Un borde de 0.dp se dibujaría como línea fina: sin elegir, no hay borde.
+                .then(if (border > 0.dp) Modifier.border(border, MaterialTheme.colorScheme.primary, RoundedCornerShape(22.dp)) else Modifier),
+        ) {
+            cover?.let {
+                AsyncImage(
+                    model = it.thumb.takeIf { thumb -> thumb.exists() } ?: it.file,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize().padding(border).clip(RoundedCornerShape(22.dp - border)),
+                )
+            }
+            if (favorite) {
+                Icon(
+                    Icons.Filled.Favorite,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp).size(20.dp),
+                )
+            }
+        }
+        Text(
+            name,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+        )
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun NewCollectionCard(onClick: () -> Unit) {
+    Column(Modifier.width(COLLECTION_SIZE).clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .size(COLLECTION_SIZE)
+                .clip(RoundedCornerShape(22.dp))
+                .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(22.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+        }
+        Text("Nuevo álbum", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp))
     }
 }
 
@@ -850,10 +1153,9 @@ private fun AlbumPickerDialog(albums: List<Album>, onDismiss: () -> Unit, onPick
 }
 
 @Composable
-private fun EmptyAlbum() {
+private fun EmptyCollection(text: String) {
     Text(
-        "Este álbum está vacío. Tocá «Agregar al álbum», o en «Todas» mantené presionadas " +
-            "algunas fotos y sumalas desde arriba.",
+        text,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -894,8 +1196,8 @@ private fun PolaroidStack(photos: List<Photo>) {
 }
 
 @Composable
-private fun ImportingRow(progress: ImportProgress) {
-    Column(Modifier.padding(vertical = 8.dp)) {
+private fun ImportingRow(progress: ImportProgress, modifier: Modifier = Modifier) {
+    Column(modifier.padding(vertical = 8.dp)) {
         Text(
             "Agregando ${progress.done} de ${progress.total}…",
             style = MaterialTheme.typography.bodyMedium,
@@ -910,11 +1212,11 @@ private fun ImportingRow(progress: ImportProgress) {
 
 /** Aviso de versión nueva, con sus novedades y el avance de la descarga. */
 @Composable
-private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(top = 12.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -949,11 +1251,11 @@ private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: ()
 /** Mientras el usuario elige fotos en Google Fotos. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GooglePhotosStatus(status: String, onCheck: () -> Unit, onReopen: () -> Unit, onCancel: () -> Unit) {
+private fun GooglePhotosStatus(status: String, onCheck: () -> Unit, onReopen: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(top = 12.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1024,12 +1326,13 @@ private fun PhotoTile(
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
-    val inset by animateDpAsState(if (selected) 8.dp else 0.dp, label = "inset")
-    val corner by animateDpAsState(if (selected) 20.dp else 14.dp, label = "corner")
+    val inset by animateDpAsState(if (selected) 10.dp else 0.dp, label = "inset")
+    val corner by animateDpAsState(if (selected) 16.dp else 3.dp, label = "corner")
     Box(
         modifier
             .fillMaxWidth()
-            .aspectRatio(photo.aspectRatio.coerceIn(0.6f, 1.7f))
+            // Cuadradas, como en las galerías: la grilla queda pareja y entran más.
+            .aspectRatio(1f)
             .combinedClickable(
                 onClick = { if (selecting) onToggle() else onOpen() },
                 onLongClick = {
@@ -1053,7 +1356,7 @@ private fun PhotoTile(
                 Icons.Filled.Favorite,
                 contentDescription = "Favorita",
                 tint = Color.White,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(18.dp),
+                modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).size(16.dp),
             )
         }
         if (selecting) {

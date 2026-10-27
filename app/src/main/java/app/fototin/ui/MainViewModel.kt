@@ -85,9 +85,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _sortByTaken = MutableStateFlow(settings.sortByTaken)
     val sortByTaken: StateFlow<Boolean> = _sortByTaken.asStateFlow()
 
+    /** Mirando solo las favoritas (una colección fija, no un álbum). */
+    private val _favoritesOnly = MutableStateFlow(false)
+    val favoritesOnly: StateFlow<Boolean> = _favoritesOnly.asStateFlow()
+
     /** Fotos del álbum actual (o todas): las más nuevas primero, por fecha de la foto o de agregada. */
-    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum, _sortByTaken) { photos, album, byTaken ->
-        val inView = if (album == null) {
+    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum, _sortByTaken, _favoritesOnly) { photos, album, byTaken, favorites ->
+        val inView = if (favorites) {
+            photos.filter { it.favorite }
+        } else if (album == null) {
             photos
         } else {
             val byId = photos.associateBy { it.id }
@@ -580,6 +586,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openAlbum(id: String?) {
         _currentAlbumId.value = id
+        _favoritesOnly.value = false
+        clearSelection()
+    }
+
+    fun openFavorites() {
+        _currentAlbumId.value = null
+        _favoritesOnly.value = true
         clearSelection()
     }
 
@@ -616,6 +629,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val album = withContext(Dispatchers.IO) { albumRepository.create(name, ids) }
             _currentAlbumId.value = album.id
+            _favoritesOnly.value = false
             refresh()
         }
     }
@@ -673,6 +687,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val album = withContext(Dispatchers.IO) { albumRepository.create(name, ids) }
             _currentAlbumId.value = album.id
+            _favoritesOnly.value = false
             refresh()
             _messages.tryEmit("Álbum «${album.name}» creado con ${ids.size} fotos")
         }
