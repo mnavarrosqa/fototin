@@ -16,6 +16,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_SHUFFLE, false)
         set(value) = prefs.edit().putBoolean(KEY_SHUFFLE, value).apply()
 
+    /** El intervalo propio más corto entre los widgets (0 si ninguno tiene uno propio). */
+    var shortestWidgetInterval: Int
+        get() = prefs.getInt(KEY_SHORTEST_WIDGET_INTERVAL, 0)
+        set(value) = prefs.edit().putInt(KEY_SHORTEST_WIDGET_INTERVAL, value).apply()
+
     /** Ordenar la grilla por fecha de la foto (true) o por fecha en que se agregó (false). */
     var sortByTaken: Boolean
         get() = prefs.getBoolean(KEY_SORT_TAKEN, false)
@@ -99,6 +104,7 @@ class Settings(context: Context) {
     }
 
     companion object {
+        private const val KEY_SHORTEST_WIDGET_INTERVAL = "shortest_widget_interval"
         private const val KEY_SCREENSAVER_SOURCE = "screensaver_source"
         private const val KEY_MEMORIES_NOTIFICATION = "memories_notification"
         private const val KEY_PICKER_SESSION = "picker_session"

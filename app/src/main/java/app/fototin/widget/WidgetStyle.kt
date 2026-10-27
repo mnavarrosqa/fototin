@@ -1,7 +1,16 @@
 package app.fototin.widget
 
-enum class WidgetStyle(val label: String) {
+/**
+ * Estilos del widget de una foto.
+ *
+ * @param alwaysText el estilo siempre lleva texto (la nota o la fecha), aunque no esté activado
+ * "Mostrar nota o fecha".
+ */
+enum class WidgetStyle(val label: String, val alwaysText: Boolean = false) {
     ROUNDED("Redondeado"),
+    FIT("Ajustada"),
+    CALENDAR("Calendario"),
+    POSTCARD("Postal", alwaysText = true),
     POLAROID("Polaroid"),
     WASHI("Washi"),
     ARCH("Arco"),

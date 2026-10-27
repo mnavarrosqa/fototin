@@ -58,7 +58,8 @@ class FotoWidget : GlanceAppWidget() {
                 EmptyWidget(if (source is WidgetSource.FromAlbum) "Este álbum está vacío" else "Elegí tus fotos")
             } else {
                 val photo = photos.firstOrNull { it.id == prefs[WidgetKeys.PHOTO_ID] } ?: photos.first()
-                val caption = PhotoPool.caption(photo, source, prefs[WidgetKeys.SHOW_DATE] ?: false)
+                val style = WidgetStyle.from(prefs[WidgetKeys.STYLE])
+                val caption = PhotoPool.caption(photo, source, (prefs[WidgetKeys.SHOW_DATE] ?: false) || style.alwaysText)
                 val tap = when (TapAction.from(prefs[WidgetKeys.TAP])) {
                     TapAction.NEXT -> actionRunCallback<NextPhotoAction>()
                     TapAction.VIEW -> actionStartActivity<PhotoViewerActivity>(
@@ -69,7 +70,7 @@ class FotoWidget : GlanceAppWidget() {
                     )
                     TapAction.OPEN_APP -> actionStartActivity<MainActivity>()
                 }
-                PhotoContent(photo, WidgetStyle.from(prefs[WidgetKeys.STYLE]), caption, tap)
+                PhotoContent(photo, style, caption, tap)
             }
         }
     }
@@ -80,7 +81,9 @@ class FotoWidget : GlanceAppWidget() {
         val size = LocalSize.current
         val density = context.resources.displayMetrics.density
         // La clave incluye la foto entera: si cambia su encuadre, hay que redibujar.
-        val bitmap = remember(photo, style, caption, size) {
+        // El Calendario muestra la fecha de hoy: al cambiar el día hay que redibujarlo.
+        val day = if (style == WidgetStyle.CALENDAR) java.time.LocalDate.now().toEpochDay() else 0L
+        val bitmap = remember(photo, style, caption, size, day) {
             val w = (size.width.value * density).toInt()
             val h = (size.height.value * density).toInt()
             WidgetSupport.load(photo, maxOf(w, h))?.let { source ->

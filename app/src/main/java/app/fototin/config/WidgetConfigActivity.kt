@@ -64,6 +64,7 @@ import app.fototin.data.WidgetSource
 import app.fototin.data.collageSelection
 import app.fototin.ui.FototinTheme
 import app.fototin.widget.CollageStyle
+import app.fototin.widget.RotationScheduler
 import app.fototin.widget.CollageStyler
 import app.fototin.widget.CollageWidget
 import app.fototin.widget.CollageWidgetReceiver
@@ -87,6 +88,8 @@ private data class Choice(
     val count: Int,
     val collageStyle: CollageStyle,
     val rotateOne: Boolean,
+    /** Intervalo propio en minutos; null = el de Ajustes. */
+    val interval: Int?,
 )
 
 /** Se abre al agregar (o reconfigurar) un widget de foto o un collage. */
@@ -126,6 +129,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 count = prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT,
                 collageStyle = CollageStyle.from(prefs[WidgetKeys.COLLAGE_STYLE]),
                 rotateOne = prefs[WidgetKeys.ROTATE_ONE] ?: false,
+                interval = prefs[WidgetKeys.INTERVAL],
             )
 
             setContent {
@@ -153,12 +157,15 @@ class WidgetConfigActivity : ComponentActivity() {
                 it[WidgetKeys.COUNT] = choice.collageStyle.clampCount(choice.count)
                 it[WidgetKeys.COLLAGE_STYLE] = choice.collageStyle.name
                 it[WidgetKeys.ROTATE_ONE] = choice.rotateOne
+                if (choice.interval == null) it.remove(WidgetKeys.INTERVAL) else it[WidgetKeys.INTERVAL] = choice.interval
             }
             if (isCollage) {
                 CollageWidget().update(this@WidgetConfigActivity, glanceId)
             } else {
                 FotoWidget().update(this@WidgetConfigActivity, glanceId)
             }
+            // Este widget puede tener su propio intervalo: reprogramar la rotación.
+            RotationScheduler.refresh(this@WidgetConfigActivity)
             setResult(RESULT_OK, resultIntent())
             finish()
         }
@@ -181,6 +188,7 @@ class WidgetConfigActivity : ComponentActivity() {
         var collageStyle by remember { mutableStateOf(initial.collageStyle) }
         var count by remember { mutableIntStateOf(initial.collageStyle.clampCount(initial.count)) }
         var rotateOne by remember { mutableStateOf(initial.rotateOne) }
+        var interval by remember { mutableStateOf(initial.interval) }
 
         // Las fotos que el widget muestra ahora, si siguen entre las elegidas: la vista previa es fiel.
         val photos by produceState<List<Photo>>(emptyList(), source, count) {
@@ -198,7 +206,7 @@ class WidgetConfigActivity : ComponentActivity() {
         val sources by produceState<List<StyledSource>>(emptyList(), photos) {
             value = withContext(Dispatchers.IO) { photos.mapNotNull { WidgetSupport.load(it, 720) } }
         }
-        val caption = photos.firstOrNull()?.let { PhotoPool.caption(it, source, showDate) }
+        val caption = photos.firstOrNull()?.let { PhotoPool.caption(it, source, showDate || style.alwaysText) }
         val captions = photos.map { PhotoPool.caption(it, source, showDate) }
         val seed = CollageWidget.seedOf(photos)
         val corner = WidgetSupport.launcherCornerDp(this, fallback = if (isCollage) 20f else 28f)
@@ -231,7 +239,8 @@ class WidgetConfigActivity : ComponentActivity() {
             } else {
                 withContext(Dispatchers.Default) {
                     WidgetStyle.entries.associateWith {
-                        PhotoStyler.render(sources.first(), it, 240, 240, 240f / PREVIEW_DP, cornerDp = corner)
+                        val text = if (it.alwaysText) photos.firstOrNull()?.let { p -> PhotoPool.caption(p, source, true) } else null
+                        PhotoStyler.render(sources.first(), it, 240, 240, 240f / PREVIEW_DP, text, corner)
                     }
                 }
             }
@@ -251,6 +260,9 @@ class WidgetConfigActivity : ComponentActivity() {
                     Preview(large, isEmpty = photos.isEmpty(), source = source)
                     Spacer(Modifier.height(16.dp))
 
+                    Label("Cambiar de foto")
+                    ChipRow(INTERVAL_CHOICES, interval, ::intervalChoiceLabel, { interval = it })
+                    Spacer(Modifier.height(16.dp))
                     if (isCollage) {
                         Label("Diseño")
                         LazyRow(
@@ -330,7 +342,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { onSave(Choice(source, style, showDate, tap, count, collageStyle, rotateOne)) },
+                    onClick = { onSave(Choice(source, style, showDate, tap, count, collageStyle, rotateOne, interval)) },
                     modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(52.dp),
                 ) {
                     Text("Listo")
@@ -471,7 +483,18 @@ class WidgetConfigActivity : ComponentActivity() {
         }
     }
 
+    private fun intervalChoiceLabel(minutes: Int?): String = when {
+        minutes == null -> "Como en Ajustes"
+        minutes == 0 -> "Al tocar"
+        minutes < 60 -> "$minutes min"
+        minutes < 1440 -> "${minutes / 60} h"
+        else -> "1 día"
+    }
+
     private companion object {
+        /** null = usar el intervalo de Ajustes. */
+        val INTERVAL_CHOICES: List<Int?> = listOf(null, 0, 15, 60, 360, 1440)
+
         /** Tamaño típico de un widget de 2×2, para que las vistas previas tengan sus proporciones. */
         const val PREVIEW_DP = 180f
         /** Ancho típico de un collage de 4×2. */

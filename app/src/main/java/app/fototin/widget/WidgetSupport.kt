@@ -11,6 +11,7 @@ import java.io.File
 import android.os.Build
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
@@ -56,6 +57,10 @@ object WidgetKeys {
     val ROTATE_ONE = booleanPreferencesKey("rotate_one")
     /** Próximo lugar del collage a cambiar cuando se cambia de a una. */
     val SLOT = intPreferencesKey("slot")
+    /** Cada cuántos minutos cambia este widget; sin valor, el de Ajustes. 0 = solo al tocarlo. */
+    val INTERVAL = intPreferencesKey("interval")
+    /** Cuándo cambió de foto por última vez (para respetar su propio intervalo). */
+    val LAST_CHANGE = longPreferencesKey("last_change")
 }
 
 object WidgetSupport {
@@ -135,8 +140,9 @@ object WidgetSupport {
         } else {
             val photo = pool.firstOrNull { it.id == prefs[WidgetKeys.PHOTO_ID] } ?: pool.first()
             load(photo, longestPx)?.let { src ->
-                val caption = PhotoPool.caption(photo, source, showText)
-                PhotoStyler.render(src, WidgetStyle.from(prefs[WidgetKeys.STYLE]), w, h, scale, caption, launcherCornerDp(context, 28f), maxOutputPx)
+                val style = WidgetStyle.from(prefs[WidgetKeys.STYLE])
+                val caption = PhotoPool.caption(photo, source, showText || style.alwaysText)
+                PhotoStyler.render(src, style, w, h, scale, caption, launcherCornerDp(context, 28f), maxOutputPx)
                     .also { src.bitmap.recycle() }
             }
         }
