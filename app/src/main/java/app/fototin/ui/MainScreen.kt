@@ -101,6 +101,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
 import coil.compose.AsyncImage
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -325,6 +326,7 @@ fun MainScreen(
                         onUpdate = onUpdate,
                         onDismissUpdate = viewModel::dismissUpdate,
                         onReopenGooglePhotos = viewModel::reopenGooglePhotos,
+                        onCheckGooglePhotos = viewModel::checkGooglePhotosNow,
                         onCancelGooglePhotos = viewModel::cancelGooglePhotos,
                         selection = selection,
                         sortByTaken = sortByTaken,
@@ -493,6 +495,7 @@ private fun PhotosTab(
     onUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
     onReopenGooglePhotos: () -> Unit,
+    onCheckGooglePhotos: () -> Unit,
     onCancelGooglePhotos: () -> Unit,
     selection: Set<String>,
     sortByTaken: Boolean,
@@ -555,7 +558,7 @@ private fun PhotosTab(
         }
         googlePhotos?.let { status ->
             item(span = StaggeredGridItemSpan.FullLine) {
-                GooglePhotosStatus(status, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos)
+                GooglePhotosStatus(status, onCheck = onCheckGooglePhotos, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos)
             }
         }
         importing?.let { progress ->
@@ -914,7 +917,7 @@ private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: ()
 /** Mientras el usuario elige fotos en Google Fotos. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GooglePhotosStatus(status: String, onReopen: () -> Unit, onCancel: () -> Unit) {
+private fun GooglePhotosStatus(status: String, onCheck: () -> Unit, onReopen: () -> Unit, onCancel: () -> Unit) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -927,6 +930,7 @@ private fun GooglePhotosStatus(status: String, onReopen: () -> Unit, onCancel: (
                 Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                FilledTonalButton(onClick = onCheck) { Text("Ya elegí las fotos") }
                 TextButton(onClick = onReopen) { Text("Abrir Google Fotos") }
                 TextButton(onClick = onCancel) { Text("Cancelar") }
             }

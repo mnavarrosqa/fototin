@@ -61,7 +61,38 @@ class Settings(context: Context) {
         return name to notes
     }
 
+    /** Una elección de Google Fotos en curso, guardada por si Android cierra la app. */
+    data class PendingPicker(val sessionId: String, val pickerUri: String, val albumId: String?, val createdAt: Long)
+
+    fun savePendingPicker(pending: PendingPicker) {
+        prefs.edit()
+            .putString(KEY_PICKER_SESSION, pending.sessionId)
+            .putString(KEY_PICKER_URI, pending.pickerUri)
+            .putString(KEY_PICKER_ALBUM, pending.albumId)
+            .putLong(KEY_PICKER_CREATED, pending.createdAt)
+            .apply()
+    }
+
+    /** La elección pendiente, si la hay y no venció (Google las da por vencidas en menos de una hora). */
+    fun pendingPicker(): PendingPicker? {
+        val id = prefs.getString(KEY_PICKER_SESSION, null) ?: return null
+        val createdAt = prefs.getLong(KEY_PICKER_CREATED, 0L)
+        if (System.currentTimeMillis() - createdAt > 50 * 60 * 1000L) {
+            clearPendingPicker()
+            return null
+        }
+        return PendingPicker(id, prefs.getString(KEY_PICKER_URI, null).orEmpty(), prefs.getString(KEY_PICKER_ALBUM, null), createdAt)
+    }
+
+    fun clearPendingPicker() {
+        prefs.edit().remove(KEY_PICKER_SESSION).remove(KEY_PICKER_URI).remove(KEY_PICKER_ALBUM).remove(KEY_PICKER_CREATED).apply()
+    }
+
     companion object {
+        private const val KEY_PICKER_SESSION = "picker_session"
+        private const val KEY_PICKER_URI = "picker_uri"
+        private const val KEY_PICKER_ALBUM = "picker_album"
+        private const val KEY_PICKER_CREATED = "picker_created"
         private const val KEY_AUTO_UPDATES = "auto_updates"
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_NOTES_VERSION = "notes_version"

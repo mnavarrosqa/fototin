@@ -36,6 +36,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
+import android.util.Log
 import java.io.File
 
 /** Una versión nueva: disponible para instalar o descargándose. */
@@ -45,6 +48,8 @@ sealed interface UpdateState {
     data class Available(override val release: Release) : UpdateState
     data class Downloading(override val release: Release, val progress: Float) : UpdateState
 }
+
+private const val TAG = "Fototin"
 
 private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
@@ -195,66 +200,135 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var pickerUri: String? = null
 
+    /** Toques para consultar la sesión ya mismo (al volver a la app o con "Ya elegí las fotos"). */
+    private val pickerPokes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    @Volatile private var manualPickerCheck = false
+
+    /** La app necesita un permiso nuevo de Google para retomar una elección que quedó pendiente. */
+    private val _needsGoogleAuth = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val needsGoogleAuth: SharedFlow<Unit> = _needsGoogleAuth.asSharedFlow()
+
     /**
      * Abre la pantalla de Google Fotos para elegir fotos y, cuando el usuario termina, las descarga
      * e importa. [token] es el permiso que dio el usuario (solo lectura de lo que elija).
      */
     fun pickFromGooglePhotos(token: String) {
+        settings.clearPendingPicker()
+        runGooglePhotos(token, resume = null)
+    }
+
+    /** Retoma la elección que quedó pendiente si Android cerró la app mientras estaba en Google Fotos. */
+    fun resumeGooglePhotos(token: String) {
+        val pending = settings.pendingPicker() ?: return
+        runGooglePhotos(token, resume = pending)
+    }
+
+    /** Al volver a la app: consultar ya mismo, o retomar una elección pendiente. */
+    fun onAppResumed() {
+        if (googleJob?.isActive == true) {
+            pickerPokes.tryEmit(Unit)
+        } else if (settings.pendingPicker() != null) {
+            _needsGoogleAuth.tryEmit(Unit)
+        }
+    }
+
+    /** Botón "Ya elegí las fotos": consulta ahora y, si Google todavía no lo registró, lo explica. */
+    fun checkGooglePhotosNow() {
+        manualPickerCheck = true
+        pickerPokes.tryEmit(Unit)
+    }
+
+    private fun runGooglePhotos(token: String, resume: Settings.PendingPicker?) {
         googleJob?.cancel()
-        val albumId = _currentAlbumId.value
+        val albumId = resume?.albumId ?: _currentAlbumId.value
         googleJob = viewModelScope.launch {
             val picker = GooglePhotosPicker(token)
-            var sessionId: String? = null
+            var sessionId: String? = resume?.sessionId
+            var finished = false
             val cache = File(getApplication<Application>().cacheDir, "gphotos").apply { mkdirs() }
             try {
-                _googlePhotos.value = "Abriendo Google Fotos…"
-                var session = picker.createSession()
+                var session = if (resume == null) {
+                    _googlePhotos.value = "Abriendo Google Fotos…"
+                    picker.createSession().also { created ->
+                        // Se guarda por si Android cierra Fototin mientras se elige en Google Fotos.
+                        settings.savePendingPicker(Settings.PendingPicker(created.id, created.pickerUri, albumId, System.currentTimeMillis()))
+                        _openUrl.tryEmit(created.pickerUri)
+                    }
+                } else {
+                    _googlePhotos.value = "Retomando la elección de Google Fotos…"
+                    picker.getSession(resume.sessionId)
+                }
                 sessionId = session.id
                 pickerUri = session.pickerUri
-                _openUrl.tryEmit(session.pickerUri)
-                _googlePhotos.value = "Elegí las fotos en Google Fotos y tocá «Listo». Después volvé a Fototin."
-                // Google avisa por la sesión cuándo terminó la elección: se consulta cada pocos segundos.
+                _googlePhotos.value = "Elegí las fotos en Google Fotos, tocá «Listo» y volvé a Fototin."
+                // Google avisa por la sesión cuándo terminó la elección. Se consulta cada pocos
+                // segundos, y enseguida al volver a la app o al tocar "Ya elegí las fotos".
                 val deadline = System.currentTimeMillis() + session.timeoutMs
                 while (!session.ready) {
                     if (System.currentTimeMillis() > deadline) error("Se venció el tiempo para elegir las fotos")
-                    delay(session.pollIntervalMs)
+                    withTimeoutOrNull(session.pollIntervalMs) { pickerPokes.first() }
                     session = picker.getSession(session.id)
+                    Log.d(TAG, "Sesión ${session.id}: elegidas=${session.ready}")
+                    if (!session.ready && manualPickerCheck) {
+                        _messages.tryEmit(
+                            "Google Fotos todavía no registró tu elección. Tocá «Listo» en Google Fotos con " +
+                                "la misma cuenta que autorizaste en Fototin.",
+                        )
+                    }
+                    manualPickerCheck = false
                 }
+                _googlePhotos.value = "Trayendo las fotos elegidas…"
                 val items = picker.listItems(session.id).filter { it.isPhoto }
+                Log.d(TAG, "Fotos elegidas: ${items.size}")
                 if (items.isEmpty()) {
-                    _messages.tryEmit("No elegiste fotos")
+                    finished = true
+                    _messages.tryEmit("No elegiste fotos (los videos no se agregan)")
                     return@launch
                 }
                 _googlePhotos.value = null
                 _importing.value = ImportProgress(0, items.size * 2)
                 val downloaded = items.mapIndexedNotNull { i, item ->
-                    runCatching { picker.download(item, cache) }.getOrNull()
+                    runCatching { picker.download(item, cache) }
+                        .onFailure { Log.w(TAG, "No se pudo descargar ${item.id}", it) }
+                        .getOrNull()
                         ?.let { Uri.fromFile(it) to item.createdAt }
                         .also { _importing.value = ImportProgress(i + 1, items.size * 2) }
                 }
+                if (downloaded.isEmpty()) error("no se pudo descargar ninguna foto")
                 val takenAt = downloaded.mapNotNull { (uri, at) -> at?.let { uri to it } }.toMap()
                 val result = repository.import(downloaded.map { it.first }, takenAt) { done, _ ->
                     _importing.value = ImportProgress(items.size + done, items.size * 2)
                 }
                 if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, result.ids) }
                 refresh()
+                finished = true
                 announceImport(result.copy(failed = result.failed + items.size - downloaded.size), insideAlbum = albumId != null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: GooglePhotosPicker.PickerException) {
+                finished = true
+                Log.w(TAG, "Error de Google Fotos ${e.code}", e)
                 _messages.tryEmit(
                     when (e.code) {
-                        401, 403 -> "Google Fotos no dio permiso. Revisá que tu cuenta sea usuario de prueba del proyecto."
-                        else -> "Google Fotos: ${e.message}"
+                        401, 403 -> "Google Fotos no dio permiso (${e.code}). Revisá que tu cuenta sea usuario de prueba del proyecto."
+                        404 -> "La elección de Google Fotos venció. Volvé a intentarlo."
+                        else -> "Google Fotos (${e.code}): ${e.message}"
                     },
                 )
             } catch (e: Exception) {
+                finished = true
+                Log.w(TAG, "No se pudieron traer las fotos", e)
                 _messages.tryEmit("No se pudieron traer las fotos: ${e.message ?: "sin conexión"}")
             } finally {
                 _googlePhotos.value = null
                 _importing.value = null
                 pickerUri = null
-                sessionId?.let { id -> viewModelScope.launch { picker.deleteSession(id) } }
+                manualPickerCheck = false
+                // Si la app se cerró a mitad de camino, la sesión queda guardada para retomarla.
+                if (finished) {
+                    settings.clearPendingPicker()
+                    sessionId?.let { id -> viewModelScope.launch { picker.deleteSession(id) } }
+                }
                 cache.listFiles()?.forEach { it.delete() }
             }
         }
@@ -266,6 +340,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancelGooglePhotos() {
+        settings.clearPendingPicker()
         googleJob?.cancel()
     }
 
