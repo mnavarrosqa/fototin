@@ -354,6 +354,8 @@ fun MainScreen(
                         padding = padding,
                         interval = interval,
                         shuffle = shuffle,
+                        gridSize = gridSize,
+                        onGridSize = viewModel::setGridSize,
                         backupBusy = backupBusy,
                         photoCount = photos.size,
                         dynamicColor = dynamicColor,
