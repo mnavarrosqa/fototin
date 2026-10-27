@@ -40,5 +40,28 @@ fun pickNext(
 fun collageSelection(pool: List<Photo>, savedIds: String?, count: Int): List<Photo> {
     val byId = pool.associateBy { it.id }
     val saved = savedIds?.split(',')?.mapNotNull { byId[it] }.orEmpty().distinct()
-    return (saved + pool.filter { it !in saved }).take(count.coerceIn(1, 4))
+    return (saved + pool.filter { it !in saved }).take(count.coerceIn(1, 6))
+}
+
+/**
+ * Cambia una sola foto del collage: la del lugar [slot] (que va rotando), por una que no esté ya en
+ * el collage. Devuelve las fotos nuevas, el próximo lugar a cambiar y el nuevo [seen].
+ */
+fun rotateOne(
+    ids: List<String>,
+    current: List<String>,
+    slot: Int,
+    seen: Set<String>,
+    shuffle: Boolean,
+    random: kotlin.random.Random = kotlin.random.Random,
+): Triple<List<String>, Int, Set<String>> {
+    if (current.isEmpty()) return Triple(current, 0, seen)
+    val position = slot.mod(current.size)
+    val leaving = current[position]
+    // Las que se pueden poner: todas menos las que siguen en el collage.
+    val candidates = ids.filter { it == leaving || it !in current }
+    if (candidates.size <= 1) return Triple(current, (position + 1) % current.size, seen)
+    val (next, newSeen) = pickNext(candidates, listOf(leaving), seen, 1, shuffle, random)
+    val updated = current.toMutableList().apply { set(position, next.first()) }
+    return Triple(updated, (position + 1) % current.size, newSeen)
 }

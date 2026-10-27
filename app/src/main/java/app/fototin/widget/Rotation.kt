@@ -18,6 +18,7 @@ import app.fototin.data.Settings
 import app.fototin.data.WidgetSource
 import app.fototin.data.collageSelection
 import app.fototin.data.pickNext
+import app.fototin.data.rotateOne
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
@@ -35,17 +36,27 @@ suspend fun advancePhoto(context: Context, glanceId: GlanceId) {
     FotoWidget().update(context, glanceId)
 }
 
-/** Cambia todas las fotos de un collage. */
+/** Cambia las fotos de un collage: todas juntas o de a una, según cómo esté configurado. */
 suspend fun advanceCollage(context: Context, glanceId: GlanceId) {
     val shuffle = Settings(context).shuffle
     updateAppWidgetState(context, glanceId) { prefs ->
         val pool = PhotoPool.resolve(context, WidgetSource.from(prefs[WidgetKeys.SOURCE]))
         if (pool.isEmpty()) return@updateAppWidgetState
-        val count = prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT
+        val style = CollageStyle.from(prefs[WidgetKeys.COLLAGE_STYLE])
+        val count = style.clampCount(prefs[WidgetKeys.COUNT] ?: CollageWidget.DEFAULT_COUNT)
         val current = collageSelection(pool, prefs[WidgetKeys.PHOTO_IDS], count).map { it.id }
-        val (next, seen) = pickNext(pool.map { it.id }, current, prefs[WidgetKeys.SEEN].orEmpty(), count, shuffle)
-        prefs[WidgetKeys.PHOTO_IDS] = next.joinToString(",")
-        prefs[WidgetKeys.SEEN] = seen
+        val ids = pool.map { it.id }
+        if (prefs[WidgetKeys.ROTATE_ONE] == true) {
+            // De a una: el collage se va renovando de a poco.
+            val (next, slot, seen) = rotateOne(ids, current, prefs[WidgetKeys.SLOT] ?: 0, prefs[WidgetKeys.SEEN].orEmpty(), shuffle)
+            prefs[WidgetKeys.PHOTO_IDS] = next.joinToString(",")
+            prefs[WidgetKeys.SLOT] = slot
+            prefs[WidgetKeys.SEEN] = seen
+        } else {
+            val (next, seen) = pickNext(ids, current, prefs[WidgetKeys.SEEN].orEmpty(), count, shuffle)
+            prefs[WidgetKeys.PHOTO_IDS] = next.joinToString(",")
+            prefs[WidgetKeys.SEEN] = seen
+        }
     }
     CollageWidget().update(context, glanceId)
 }
