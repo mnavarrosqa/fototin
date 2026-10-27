@@ -39,6 +39,11 @@ tenés puestos y para agregar nuevos) y **Ajustes** (rotación, copia de segurid
   editarlo sin ir a la pantalla de inicio.
 - **Orden:** por fecha en que se agregaron o por fecha de la foto, separadas por año.
 - **Sin repetidas:** al importar se reconocen las fotos que ya estaban.
+- **Presentación:** las fotos de un álbum, las favoritas o los recuerdos a pantalla completa, con
+  un zoom lento hacia la parte importante de cada una.
+- **Protector de pantalla:** la misma presentación mientras el teléfono carga.
+- **Aviso de recuerdos (opcional):** una notificación a la mañana cuando hay fotos de un día como hoy.
+- **Compartir un widget como imagen**, por ejemplo un collage.
 - **Copia de seguridad:** guardá todas las fotos, notas y álbumes en un .zip y restauralas en
   otro teléfono o después de reinstalar (se suman a lo que ya hay, sin repetir).
 - **Preparada para foldables:** desplegada usa una barra lateral y el detalle de cada foto se

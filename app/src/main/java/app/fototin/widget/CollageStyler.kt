@@ -31,8 +31,9 @@ object CollageStyler {
         cornerDp: Float = 20f,
         captions: List<String?> = emptyList(),
         seed: Int = 0,
+        maxOutputPx: Int = PhotoStyler.MAX_OUTPUT_PX,
     ): Bitmap {
-        val (out, canvas, dp) = PhotoStyler.canvasFor(widthPx, heightPx, density)
+        val (out, canvas, dp) = PhotoStyler.canvasFor(widthPx, heightPx, density, maxOutputPx)
         val bounds = RectF(0f, 0f, out.width.toFloat(), out.height.toFloat())
         if (sources.isEmpty()) return out
         when (style) {

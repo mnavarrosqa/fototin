@@ -17,6 +17,9 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.IntentCompat
 import app.fototin.config.WidgetConfigActivity
 import app.fototin.data.GooglePhotosPicker
+import app.fototin.notify.MemoriesNotifier
+import android.Manifest
+import android.os.Build
 import androidx.activity.result.IntentSenderRequest
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
@@ -82,14 +85,40 @@ class MainActivity : ComponentActivity() {
 
     private fun pickFromGooglePhotos() = authorizeGoogle(viewModel::pickFromGooglePhotos)
 
+    // Desde Android 13, activar el aviso de recuerdos pide permiso para notificar.
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.setMemoriesNotification(granted)
+        if (!granted) viewModel.showMessage("Sin permiso de notificaciones no se puede avisar de los recuerdos")
+    }
+
+    private fun setMemoriesNotification(enabled: Boolean) {
+        if (enabled && !MemoriesNotifier.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.setMemoriesNotification(enabled)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RotationScheduler.schedule(this)
+        MemoriesNotifier.schedule(this)
         if (savedInstanceState == null) handleShare(intent)
         lifecycleScope.launch {
             // Una elección de Google Fotos quedó pendiente (Android cerró la app): retomarla.
             viewModel.needsGoogleAuth.collect { authorizeGoogle(viewModel::resumeGooglePhotos) }
+        }
+        lifecycleScope.launch {
+            viewModel.shareImage.collect { uri ->
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("image/png")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                startActivity(Intent.createChooser(send, "Compartir widget"))
+            }
         }
         lifecycleScope.launch {
             viewModel.openUrl.collect { url ->
@@ -123,6 +152,12 @@ class MainActivity : ComponentActivity() {
                     },
                     onRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
                     onUpdate = ::startUpdate,
+                    onSlideshow = { photos, source -> startActivity(SlideshowActivity.intent(this@MainActivity, photos, source)) },
+                    onMemoriesNotification = ::setMemoriesNotification,
+                    onScreensaverSettings = {
+                        runCatching { startActivity(Intent(android.provider.Settings.ACTION_DREAM_SETTINGS)) }
+                            .onFailure { viewModel.showMessage("Este teléfono no tiene protector de pantalla") }
+                    },
                 )
             }
         }

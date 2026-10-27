@@ -14,6 +14,8 @@ import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.data.RemovedPhotos
 import app.fototin.data.Settings
+import app.fototin.data.WidgetSource
+import app.fototin.notify.MemoriesNotifier
 import app.fototin.update.Release
 import app.fototin.update.Updater
 import app.fototin.widget.PlacedWidget
@@ -488,6 +490,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setAutoCheckUpdates(enabled: Boolean) {
         settings.autoCheckUpdates = enabled
         _autoCheckUpdates.value = enabled
+    }
+
+    /** De dónde saca las fotos el protector de pantalla. */
+    private val _screensaverSource = MutableStateFlow(settings.screensaverSource)
+    val screensaverSource: StateFlow<WidgetSource> = _screensaverSource.asStateFlow()
+
+    fun setScreensaverSource(source: WidgetSource) {
+        settings.screensaverSource = source
+        _screensaverSource.value = source
+    }
+
+    private val _memoriesNotification = MutableStateFlow(settings.memoriesNotification)
+    val memoriesNotification: StateFlow<Boolean> = _memoriesNotification.asStateFlow()
+
+    /** Activa o apaga el aviso de recuerdos (el permiso de notificaciones lo pide la actividad). */
+    fun setMemoriesNotification(enabled: Boolean) {
+        settings.memoriesNotification = enabled
+        _memoriesNotification.value = enabled
+        MemoriesNotifier.schedule(getApplication())
+    }
+
+    /** Imágenes listas para compartir (la actividad abre el menú de Compartir). */
+    private val _shareImage = MutableSharedFlow<Uri>(extraBufferCapacity = 1)
+    val shareImage: SharedFlow<Uri> = _shareImage.asSharedFlow()
+
+    fun shareWidget(widget: PlacedWidget) {
+        viewModelScope.launch {
+            val uri = runCatching { WidgetSupport.shareImage(getApplication(), widget) }.getOrNull()
+            if (uri != null) _shareImage.tryEmit(uri) else _messages.tryEmit("No se pudo armar la imagen del widget")
+        }
     }
 
     fun selectAll() {

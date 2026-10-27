@@ -101,6 +101,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.Calendar
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.filled.PlayArrow
+import app.fototin.data.WidgetSource
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.NavigationRail
@@ -144,6 +146,9 @@ fun MainScreen(
     onBackup: () -> Unit,
     onRestore: () -> Unit,
     onUpdate: () -> Unit,
+    onSlideshow: (List<Photo>, WidgetSource) -> Unit,
+    onMemoriesNotification: (Boolean) -> Unit,
+    onScreensaverSettings: () -> Unit,
 ) {
     val photos by viewModel.photos.collectAsState()
     val visible by viewModel.visiblePhotos.collectAsState()
@@ -161,6 +166,8 @@ fun MainScreen(
     val gridSize by viewModel.gridSize.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
     val cleaning by viewModel.cleaning.collectAsState()
+    val screensaverSource by viewModel.screensaverSource.collectAsState()
+    val memoriesNotification by viewModel.memoriesNotification.collectAsState()
     val googlePhotos by viewModel.googlePhotos.collectAsState()
     val update by viewModel.update.collectAsState()
     val whatsNew by viewModel.whatsNew.collectAsState()
@@ -341,6 +348,7 @@ fun MainScreen(
                         onDeleteAlbum = { dialog = Dialog.DeleteAlbum(it) },
                         onOpenPhoto = viewModel::openPhoto,
                         onToggleSelection = viewModel::toggleSelection,
+                        onSlideshow = onSlideshow,
                     )
                     Tab.WIDGETS -> WidgetsTab(
                         padding = padding,
@@ -349,6 +357,7 @@ fun MainScreen(
                         onAdd = onAddWidget,
                         onNext = viewModel::advanceWidget,
                         onEdit = { onEditWidget(it.appWidgetId) },
+                        onShare = viewModel::shareWidget,
                     )
                     Tab.SETTINGS -> SettingsTab(
                         padding = padding,
@@ -369,6 +378,12 @@ fun MainScreen(
                         checkingUpdates = checkingUpdates,
                         autoCheckUpdates = autoCheckUpdates,
                         onCheckUpdates = { viewModel.checkForUpdates(manual = true) },
+                        albums = albums,
+                        screensaverSource = screensaverSource,
+                        onScreensaverSource = viewModel::setScreensaverSource,
+                        onScreensaverSettings = onScreensaverSettings,
+                        memoriesNotification = memoriesNotification,
+                        onMemoriesNotification = onMemoriesNotification,
                         onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
                         onUpdate = onUpdate,
                         onBackup = onBackup,
@@ -512,6 +527,7 @@ private fun PhotosTab(
     onDeleteAlbum: (Album) -> Unit,
     onOpenPhoto: (String) -> Unit,
     onToggleSelection: (String) -> Unit,
+    onSlideshow: (List<Photo>, WidgetSource) -> Unit,
 ) {
     val selecting = selection.isNotEmpty()
     LazyVerticalStaggeredGrid(
@@ -538,7 +554,8 @@ private fun PhotosTab(
             }
             if (memories.isNotEmpty()) {
                 item(span = StaggeredGridItemSpan.FullLine) {
-                    MemoriesBanner(memories, onClick = { onOpenPhoto(memories.first().id) })
+                    // Tocar el aviso pasa los recuerdos de hoy como presentación.
+                    MemoriesBanner(memories, onClick = { onSlideshow(memories, WidgetSource.Memories) })
                 }
             }
         }
@@ -577,6 +594,9 @@ private fun PhotosTab(
                     onGridSize = onGridSize,
                     onRename = onRenameAlbum,
                     onDelete = onDeleteAlbum,
+                    onSlideshow = {
+                        onSlideshow(visible, currentAlbum?.let { WidgetSource.FromAlbum(it.id) } ?: WidgetSource.All)
+                    },
                 )
             }
         }
@@ -688,6 +708,7 @@ private fun SectionTitle(
     onGridSize: (Int) -> Unit,
     onRename: (Album) -> Unit,
     onDelete: (Album) -> Unit,
+    onSlideshow: () -> Unit,
 ) {
     Row(Modifier.padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -705,6 +726,15 @@ private fun SectionTitle(
                 Icon(Icons.Filled.MoreVert, contentDescription = "Opciones")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Ver presentación") },
+                    leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        onSlideshow()
+                    },
+                )
+                HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Últimas agregadas") },
                     trailingIcon = { if (!sortByTaken) Icon(Icons.Filled.Check, contentDescription = null) },

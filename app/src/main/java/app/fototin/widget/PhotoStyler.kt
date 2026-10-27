@@ -27,7 +27,7 @@ class StyledSource(val bitmap: Bitmap, val focusX: Float = 0.5f, val focusY: Flo
 object PhotoStyler {
 
     /** Límite del lado más largo para no superar la memoria permitida a los widgets. */
-    private const val MAX_OUTPUT_PX = 900
+    internal const val MAX_OUTPUT_PX = 900
 
     internal const val SHADOW = 0x40000000
 
@@ -44,8 +44,9 @@ object PhotoStyler {
         density: Float,
         caption: String? = null,
         cornerDp: Float = 28f,
+        maxOutputPx: Int = MAX_OUTPUT_PX,
     ): Bitmap {
-        val (out, canvas, dp) = canvasFor(widthPx, heightPx, density)
+        val (out, canvas, dp) = canvasFor(widthPx, heightPx, density, maxOutputPx)
         val bounds = RectF(0f, 0f, out.width.toFloat(), out.height.toFloat())
 
         when (style) {
@@ -111,8 +112,8 @@ object PhotoStyler {
 
     internal data class Target(val bitmap: Bitmap, val canvas: Canvas, val dp: Float)
 
-    internal fun canvasFor(widthPx: Int, heightPx: Int, density: Float): Target {
-        val fit = min(1f, MAX_OUTPUT_PX.toFloat() / max(widthPx, heightPx).coerceAtLeast(1))
+    internal fun canvasFor(widthPx: Int, heightPx: Int, density: Float, maxOutputPx: Int = MAX_OUTPUT_PX): Target {
+        val fit = min(1f, maxOutputPx.toFloat() / max(widthPx, heightPx).coerceAtLeast(1))
         val w = (widthPx * fit).toInt().coerceAtLeast(1)
         val h = (heightPx * fit).toInt().coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
