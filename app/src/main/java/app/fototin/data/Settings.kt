@@ -31,6 +31,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_DYNAMIC_COLOR, false)
         set(value) = prefs.edit().putBoolean(KEY_DYNAMIC_COLOR, value).apply()
 
+    /** De dónde saca las fotos el protector de pantalla (clave de [WidgetSource]). */
+    var screensaverSource: WidgetSource
+        get() = WidgetSource.from(prefs.getString(KEY_SCREENSAVER_SOURCE, null))
+        set(value) = prefs.edit().putString(KEY_SCREENSAVER_SOURCE, value.key).apply()
+
+    /** Avisar a la mañana cuando hay recuerdos de un día como hoy. */
+    var memoriesNotification: Boolean
+        get() = prefs.getBoolean(KEY_MEMORIES_NOTIFICATION, false)
+        set(value) = prefs.edit().putBoolean(KEY_MEMORIES_NOTIFICATION, value).apply()
+
     /** Buscar versiones nuevas al abrir la app. */
     var autoCheckUpdates: Boolean
         get() = prefs.getBoolean(KEY_AUTO_UPDATES, true)
@@ -89,6 +99,8 @@ class Settings(context: Context) {
     }
 
     companion object {
+        private const val KEY_SCREENSAVER_SOURCE = "screensaver_source"
+        private const val KEY_MEMORIES_NOTIFICATION = "memories_notification"
         private const val KEY_PICKER_SESSION = "picker_session"
         private const val KEY_PICKER_URI = "picker_uri"
         private const val KEY_PICKER_ALBUM = "picker_album"

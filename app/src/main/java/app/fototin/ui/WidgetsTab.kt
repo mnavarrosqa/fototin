@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -47,6 +49,7 @@ fun WidgetsTab(
     onAdd: (collage: Boolean) -> Unit,
     onNext: (PlacedWidget) -> Unit,
     onEdit: (PlacedWidget) -> Unit,
+    onShare: (PlacedWidget) -> Unit,
 ) {
     LazyColumn(
         contentPadding = PaddingValues(
@@ -76,6 +79,7 @@ fun WidgetsTab(
                             widget,
                             onNext = { onNext(widget) },
                             onEdit = { onEdit(widget) },
+                            onShare = { onShare(widget) },
                             // Con uno solo ocupa todo el ancho; con varios se asoma el siguiente.
                             modifier = Modifier.fillParentMaxWidth(if (widgets.size == 1) 1f else 0.88f),
                         )
@@ -131,7 +135,7 @@ internal fun SectionHeader(title: String, subtitle: String? = null) {
  * botones entren aunque el teléfono use letra grande.
  */
 @Composable
-private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: () -> Unit, modifier: Modifier) {
+private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: () -> Unit, onShare: () -> Unit, modifier: Modifier) {
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -151,7 +155,12 @@ private fun PlacedWidgetCard(widget: PlacedWidget, onNext: () -> Unit, onEdit: (
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(widget.description, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(widget.description, style = MaterialTheme.typography.titleSmall, maxLines = 2, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onShare) {
+                        Icon(Icons.Filled.Share, contentDescription = "Compartir como imagen")
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 FilledTonalButton(onClick = onNext, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))

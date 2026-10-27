@@ -47,10 +47,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.fototin.R
+import app.fototin.data.Album
 import app.fototin.data.Settings
+import app.fototin.data.WidgetSource
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings as SettingsIcon
 
 /** Qué diálogo de Ajustes está abierto. */
-private enum class SettingsDialog { INTERVAL, GRID, GOOGLE_PHOTOS }
+private enum class SettingsDialog { INTERVAL, GRID, GOOGLE_PHOTOS, SCREENSAVER }
 
 /**
  * Pestaña Ajustes, organizada como los ajustes de Android: secciones con un renglón por opción
@@ -77,6 +82,12 @@ fun SettingsTab(
     autoCheckUpdates: Boolean,
     onCheckUpdates: () -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
+    albums: List<Album>,
+    screensaverSource: WidgetSource,
+    onScreensaverSource: (WidgetSource) -> Unit,
+    onScreensaverSettings: () -> Unit,
+    memoriesNotification: Boolean,
+    onMemoriesNotification: (Boolean) -> Unit,
     onUpdate: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
@@ -118,6 +129,30 @@ fun SettingsTab(
                     summary = "Sin repetir hasta mostrar todas",
                     checked = shuffle,
                     onChange = onShuffle,
+                )
+            }
+        }
+
+        item {
+            Section("Presentación y avisos") {
+                SettingRow(
+                    icon = rememberVectorPainter(Icons.Filled.PlayArrow),
+                    title = "Protector de pantalla",
+                    summary = "Muestra: ${sourceName(screensaverSource, albums)}",
+                    onClick = { dialog = SettingsDialog.SCREENSAVER },
+                )
+                SettingRow(
+                    icon = rememberVectorPainter(Icons.Filled.SettingsIcon),
+                    title = "Activar el protector de pantalla",
+                    summary = "Mientras el teléfono carga, tus fotos pasan solas. Se activa en los ajustes de Android.",
+                    onClick = onScreensaverSettings,
+                )
+                SwitchRow(
+                    icon = rememberVectorPainter(Icons.Filled.Notifications),
+                    title = "Aviso de recuerdos",
+                    summary = "A la mañana, si hay fotos de un día como hoy en otros años",
+                    checked = memoriesNotification,
+                    onChange = onMemoriesNotification,
                 )
             }
         }
@@ -245,6 +280,15 @@ fun SettingsTab(
             selected = gridSize,
             label = { GRID_LABELS[it] },
             onSelect = onGridSize,
+            onDismiss = { dialog = null },
+        )
+        SettingsDialog.SCREENSAVER -> ChoiceDialog(
+            title = "Fotos del protector de pantalla",
+            options = listOf(WidgetSource.All, WidgetSource.Favorites, WidgetSource.Memories) +
+                albums.map { WidgetSource.FromAlbum(it.id) },
+            selected = screensaverSource,
+            label = { sourceName(it, albums) },
+            onSelect = onScreensaverSource,
             onDismiss = { dialog = null },
         )
         SettingsDialog.GOOGLE_PHOTOS -> AlertDialog(
@@ -387,6 +431,13 @@ private fun <T> ChoiceDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
+}
+
+private fun sourceName(source: WidgetSource, albums: List<Album>): String = when (source) {
+    WidgetSource.All -> "Todas las fotos"
+    WidgetSource.Favorites -> "Favoritas"
+    WidgetSource.Memories -> "Recuerdos de un día como hoy"
+    is WidgetSource.FromAlbum -> albums.firstOrNull { it.id == source.albumId }?.name?.let { "Álbum «$it»" } ?: "Todas las fotos"
 }
 
 private const val RELEASES_URL = "https://github.com/mnavarrosqa/fototin/releases"
