@@ -10,6 +10,7 @@ import app.fototin.data.BackupManager
 import app.fototin.data.GooglePhotosPicker
 import app.fototin.data.ImportResult
 import app.fototin.data.Photo
+import app.fototin.data.PhotoSearch
 import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.data.RemovedPhotos
@@ -91,8 +92,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _favoritesOnly = MutableStateFlow(false)
     val favoritesOnly: StateFlow<Boolean> = _favoritesOnly.asStateFlow()
 
+    /** Búsqueda abierta y lo que se escribió (palabras de la nota, mes o año). */
+    private val _searching = MutableStateFlow(false)
+    val searching: StateFlow<Boolean> = _searching.asStateFlow()
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
     /** Fotos del álbum actual (o todas): las más nuevas primero, por fecha de la foto o de agregada. */
-    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum, _sortByTaken, _favoritesOnly) { photos, album, byTaken, favorites ->
+    val visiblePhotos: StateFlow<List<Photo>> = combine(_photos, currentAlbum, _sortByTaken, _favoritesOnly, _query) { photos, album, byTaken, favorites, query ->
         val inView = if (favorites) {
             photos.filter { it.favorite }
         } else if (album == null) {
@@ -101,7 +108,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val byId = photos.associateBy { it.id }
             album.photoIds.mapNotNull { byId[it] }
         }
-        if (byTaken) inView.sortedByDescending { it.takenAt } else inView.asReversed()
+        val found = PhotoSearch.filter(inView, query)
+        if (byTaken) found.sortedByDescending { it.takenAt } else found.asReversed()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Foto abierta en la pantalla de detalle. */
@@ -673,6 +681,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleSelection(id: String) = _selection.update { if (id in it) it - id else it + id }
+
+    /** Al arrastrar el dedo eligiendo fotos: las que ya estaban más las del tramo recorrido. */
+    fun selectRange(base: Set<String>, ids: Collection<String>) {
+        _selection.value = base + ids
+    }
+
+    fun openSearch() {
+        _searching.value = true
+    }
+
+    fun setQuery(text: String) {
+        _query.value = text.take(60)
+    }
+
+    fun closeSearch() {
+        _searching.value = false
+        _query.value = ""
+    }
 
     fun clearSelection() {
         _selection.value = emptySet()
