@@ -65,3 +65,10 @@ fun rotateOne(
     val updated = current.toMutableList().apply { set(position, next.first()) }
     return Triple(updated, (position + 1) % current.size, newSeen)
 }
+
+/**
+ * Si a un widget que cambia cada [minutes] le toca cambiar, sabiendo que cambió por última vez en
+ * [lastChange]. Se dan 2 minutos de margen porque WorkManager no corre exactamente a horario.
+ */
+fun isDue(minutes: Int, lastChange: Long, now: Long): Boolean =
+    minutes > 0 && now - lastChange >= minutes * 60_000L - 2 * 60_000L

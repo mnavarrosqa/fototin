@@ -98,5 +98,16 @@ class SelectionTest {
         assertEquals(listOf("a", "b"), same)
     }
 
+    @Test
+    fun `cada widget cambia cuando cumple su propio intervalo`() {
+        val now = 10L * 60 * 60_000
+        // Cambió hace 59 minutos y su intervalo es de 1 hora: le toca (hay 2 minutos de margen).
+        assertTrue(isDue(60, now - 59 * 60_000, now))
+        // Cambió hace 30 minutos: todavía no.
+        assertTrue(!isDue(60, now - 30 * 60_000, now))
+        // "Solo al tocar" nunca cambia solo.
+        assertTrue(!isDue(0, 0, now))
+    }
+
     private fun photo(id: String) = Photo(id, File("$id.jpg"), File("t$id.jpg"), 100, 100, 0L)
 }

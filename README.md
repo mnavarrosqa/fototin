@@ -19,15 +19,16 @@ tenés puestos y para agregar nuevos) y **Ajustes** (rotación, copia de segurid
   (no pide permisos de almacenamiento). Si en tu teléfono está activado Google Fotos como
   "app de contenido multimedia en la nube", sus fotos aparecen en el mismo selector.
 - **"Compartir → Fototin"** desde Google Fotos o cualquier galería también agrega fotos.
-- **Widget de foto con 10 estilos:** Redondeado (con las esquinas del launcher), Polaroid, Washi,
-  Arco, Círculo, Corazón, Pétalo, Estampilla, Marco y Borde a borde, con la fecha opcional.
+- **Widget de foto con 13 estilos:** Redondeado (con las esquinas del launcher), Ajustada (foto
+  entera sobre fondo desenfocado), Calendario (con la fecha de hoy), Postal, Polaroid, Washi, Arco,
+  Círculo, Corazón, Pétalo, Estampilla, Marco y Borde a borde, con la nota o fecha opcional.
   Al tocarlo pasa a la siguiente foto, la abre en grande o abre la app, según se elija.
 - **Widget Collage** con 2 a 6 fotos y 5 diseños: Mosaico, Revista, Polaroids desparramadas,
   Fotomatón y Película. Puede cambiar todas las fotos juntas o de a una, mostrar nota o fecha y
   elegir qué pasa al tocarlo.
 - **Encuadre inteligente:** al importar se detectan las caras para que el recorte no las corte.
 - Cada widget se configura al agregarlo y se puede reconfigurar manteniéndolo presionado.
-- **Rotación automática** cada 15 min, 1 h, 6 h o 1 día. En orden aleatorio no se repite
+- **Rotación automática** cada 15 min, 1 h, 6 h o 1 día; cada widget puede tener su propio intervalo. En orden aleatorio no se repite
   ninguna foto hasta haberlas mostrado todas. Tocar el widget pasa a la siguiente.
 - **Álbumes:** agrupá fotos (Vacaciones, Familia…) y elegí qué álbum muestra cada widget.
 - **Recuerdos:** un widget puede mostrar fotos de un día como hoy en otros años, con la

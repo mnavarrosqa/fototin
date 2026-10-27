@@ -7,7 +7,9 @@ import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -18,6 +20,7 @@ import app.fototin.data.Settings
 import app.fototin.data.WidgetSource
 import app.fototin.data.collageSelection
 import app.fototin.data.pickNext
+import app.fototin.data.isDue
 import app.fototin.data.rotateOne
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -32,6 +35,7 @@ suspend fun advancePhoto(context: Context, glanceId: GlanceId) {
         val (next, seen) = pickNext(ids, current, prefs[WidgetKeys.SEEN].orEmpty(), 1, shuffle)
         prefs[WidgetKeys.PHOTO_ID] = next.first()
         prefs[WidgetKeys.SEEN] = seen
+        prefs[WidgetKeys.LAST_CHANGE] = System.currentTimeMillis()
     }
     FotoWidget().update(context, glanceId)
 }
@@ -57,6 +61,7 @@ suspend fun advanceCollage(context: Context, glanceId: GlanceId) {
             prefs[WidgetKeys.PHOTO_IDS] = next.joinToString(",")
             prefs[WidgetKeys.SEEN] = seen
         }
+        prefs[WidgetKeys.LAST_CHANGE] = System.currentTimeMillis()
     }
     CollageWidget().update(context, glanceId)
 }
@@ -73,14 +78,31 @@ class NextPhotoAction : ActionCallback {
     }
 }
 
+/**
+ * Cambia las fotos de los widgets a los que les toca. Cada widget puede tener su propio intervalo;
+ * el trabajo corre al ritmo del más corto y avanza solo los que ya cumplieron el suyo.
+ */
 class RotateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val manager = GlanceAppWidgetManager(applicationContext)
-        manager.getGlanceIds(FotoWidget::class.java).forEach { advancePhoto(applicationContext, it) }
-        manager.getGlanceIds(CollageWidget::class.java).forEach { advanceCollage(applicationContext, it) }
+        val context = applicationContext
+        val manager = GlanceAppWidgetManager(context)
+        val global = Settings(context).intervalMinutes
+        val now = System.currentTimeMillis()
+        listOf(false, true).forEach { collage ->
+            val type = if (collage) CollageWidget::class.java else FotoWidget::class.java
+            manager.getGlanceIds(type).forEach { id ->
+                val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+                val minutes = prefs[WidgetKeys.INTERVAL] ?: global
+                val last = prefs[WidgetKeys.LAST_CHANGE] ?: 0L
+                if (isDue(minutes, last, now)) {
+                    if (collage) advanceCollage(context, id) else advancePhoto(context, id)
+                }
+            }
+        }
         return Result.success()
     }
 }
+
 
 /**
  * Redibuja los widgets una vez por día, pasada la medianoche. Así los Recuerdos cambian de día
@@ -99,7 +121,9 @@ object RotationScheduler {
 
     fun schedule(context: Context) {
         scheduleDaily(context)
-        val minutes = Settings(context).intervalMinutes
+        // El trabajo corre al ritmo del intervalo más corto entre Ajustes y los de cada widget.
+        val settings = Settings(context)
+        val minutes = listOf(settings.intervalMinutes, settings.shortestWidgetInterval).filter { it > 0 }.minOrNull() ?: 0
         if (minutes <= 0) {
             cancel(context)
             return
@@ -111,6 +135,18 @@ object RotationScheduler {
 
     fun cancel(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+    }
+
+    /** Recalcula el intervalo más corto entre los widgets (por ejemplo, al configurar uno) y reprograma. */
+    suspend fun refresh(context: Context) {
+        val manager = GlanceAppWidgetManager(context)
+        val intervals = listOf(FotoWidget::class.java, CollageWidget::class.java).flatMap { type ->
+            manager.getGlanceIds(type).mapNotNull { id ->
+                getAppWidgetState(context, PreferencesGlanceStateDefinition, id)[WidgetKeys.INTERVAL]
+            }
+        }
+        Settings(context).shortestWidgetInterval = intervals.filter { it > 0 }.minOrNull() ?: 0
+        schedule(context)
     }
 
     private fun scheduleDaily(context: Context) {

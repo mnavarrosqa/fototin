@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -12,6 +14,9 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -106,6 +111,12 @@ object PhotoStyler {
             WidgetStyle.WASHI -> drawPolaroid(canvas, source, bounds, dp, caption, angle = 2f, tape = true)
 
             WidgetStyle.FRAME -> drawFrame(canvas, source, bounds, dp, caption)
+
+            WidgetStyle.FIT -> drawFit(canvas, source, bounds, dp, cornerDp * dp, caption)
+
+            WidgetStyle.CALENDAR -> drawCalendar(canvas, source, bounds, dp, cornerDp * dp, caption)
+
+            WidgetStyle.POSTCARD -> drawPostcard(canvas, source, bounds, dp, caption)
         }
         return out
     }
@@ -236,6 +247,135 @@ object PhotoStyler {
             }
             val baseline = (photo.bottom + mat.bottom) / 2f - (paint.ascent() + paint.descent()) / 2f
             canvas.drawText(caption, mat.centerX(), baseline, paint)
+        }
+    }
+
+    /** La foto entera, sin recortar, sobre un fondo desenfocado de la misma foto. */
+    private fun drawFit(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, corner: Float, caption: String?) {
+        // Desenfoque barato: achicar mucho y volver a agrandar con filtrado.
+        val src = source.bitmap
+        val tiny = Bitmap.createScaledBitmap(src, 24, (24f * src.height / src.width).toInt().coerceAtLeast(1), true)
+        val blurred = Bitmap.createScaledBitmap(tiny, 96, (96f * src.height / src.width).toInt().coerceAtLeast(1), true)
+        drawPhoto(canvas, StyledSource(blurred, source.focusX, source.focusY), bounds, roundRect(bounds, corner))
+        canvas.drawPath(roundRect(bounds, corner), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33000000 })
+        if (tiny !== src) tiny.recycle()
+        blurred.recycle()
+        // La foto entera, con su proporción, centrada.
+        val area = inset(bounds, max(8 * dp, min(bounds.width(), bounds.height()) * 0.05f))
+        val scale = min(area.width() / src.width, area.height() / src.height)
+        val w = src.width * scale
+        val h = src.height * scale
+        val photo = RectF(area.centerX() - w / 2, area.centerY() - h / 2, area.centerX() + w / 2, area.centerY() + h / 2)
+        drawPhoto(canvas, source, photo, roundRect(photo, 10 * dp), shadow = dp)
+        caption?.let { drawPill(canvas, it, photo, dp, centered = true) }
+    }
+
+    /** La foto con la fecha de hoy en grande, como una hoja de calendario. */
+    private fun drawCalendar(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, corner: Float, caption: String?) {
+        drawPhoto(canvas, source, bounds, roundRect(bounds, corner))
+        // Sombreado abajo para que el texto se lea sobre cualquier foto.
+        val scrim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, bounds.top + bounds.height() * 0.45f, 0f, bounds.bottom,
+                0x00000000, 0x99000000.toInt(), Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawPath(roundRect(bounds, corner), scrim)
+        val today = Date()
+        val size = min(bounds.width(), bounds.height())
+        val dayPaint = textPaint(Color.WHITE, Typeface.create("sans-serif", Typeface.BOLD)).apply { textSize = size * 0.26f }
+        val day = SimpleDateFormat("d", Locale.getDefault()).format(today)
+        val margin = max(12 * dp, size * 0.07f)
+        val baseline = bounds.bottom - margin
+        canvas.drawText(day, bounds.left + margin, baseline, dayPaint)
+        val dayWidth = dayPaint.measureText(day)
+        val month = SimpleDateFormat("MMM", Locale.getDefault()).format(today).replace(".", "").uppercase()
+        val weekday = SimpleDateFormat("EEEE", Locale.getDefault()).format(today)
+        val monthPaint = textPaint(Color.WHITE, Typeface.create("sans-serif-medium", Typeface.NORMAL)).apply { textSize = size * 0.085f }
+        val weekdayPaint = textPaint(0xDDFFFFFF.toInt(), Typeface.create("sans-serif", Typeface.NORMAL)).apply { textSize = size * 0.065f }
+        val x = bounds.left + margin + dayWidth + size * 0.035f
+        canvas.drawText(month, x, baseline - weekdayPaint.textSize * 1.25f, monthPaint)
+        canvas.drawText(weekday, x, baseline, weekdayPaint)
+        caption?.let {
+            val pill = RectF(bounds.left, bounds.top, bounds.right, bounds.top + 22 * dp + 24 * dp)
+            drawPill(canvas, it, pill, dp, centered = false)
+        }
+    }
+
+    /** Tarjeta postal: la foto, una estampilla con la misma foto, el matasellos y el texto a mano. */
+    private fun drawPostcard(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, caption: String?) {
+        val card = inset(bounds, 6 * dp)
+        canvas.drawRoundRect(card, 4 * dp, 4 * dp, shadowPaint(Color.rgb(0xFB, 0xF7, 0xEF), dp))
+        val wide = card.width() >= card.height()
+        val pad = min(card.width(), card.height()) * 0.06f
+        val photo = if (wide) {
+            RectF(card.left + pad, card.top + pad, card.left + card.width() * 0.56f, card.bottom - pad)
+        } else {
+            RectF(card.left + pad, card.top + pad, card.right - pad, card.top + card.height() * 0.6f)
+        }
+        drawPhoto(canvas, source, photo, roundRect(photo, 2 * dp))
+        val side = if (wide) {
+            RectF(photo.right + pad, card.top + pad, card.right - pad, card.bottom - pad)
+        } else {
+            RectF(card.left + pad, photo.bottom + pad, card.right - pad, card.bottom - pad)
+        }
+        // Estampilla en la esquina, con la misma foto en miniatura.
+        val stampSize = min(side.width() * 0.34f, side.height() * 0.42f)
+        val stamp = RectF(side.right - stampSize, side.top, side.right, side.top + stampSize * 1.15f)
+        canvas.drawRect(stamp, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+        canvas.drawRect(stamp, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, dp)
+            color = 0x33000000
+            pathEffect = DashPathEffect(floatArrayOf(2 * dp, 2 * dp), 0f)
+        })
+        val stampPhoto = inset(stamp, stampSize * 0.1f)
+        drawPhoto(canvas, source, stampPhoto, roundRect(stampPhoto, 0f))
+        // Matasellos: un círculo y ondas, en tinta gastada.
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, 1.2f * dp)
+            color = 0x664A3F66
+        }
+        val r = stampSize * 0.42f
+        val cx = stamp.left - r * 0.6f
+        val cy = stamp.centerY() + r * 0.3f
+        canvas.drawCircle(cx, cy, r, ink)
+        for (k in 0..2) {
+            val y = cy - r * 0.4f + k * r * 0.4f
+            val wave = Path().apply {
+                moveTo(cx + r * 0.9f, y)
+                var x = cx + r * 0.9f
+                var up = true
+                while (x < stamp.left + stampSize * 0.6f) {
+                    quadTo(x + r * 0.2f, y + if (up) -r * 0.12f else r * 0.12f, x + r * 0.4f, y)
+                    x += r * 0.4f
+                    up = !up
+                }
+            }
+            canvas.drawPath(wave, ink)
+        }
+        // Renglones y el texto escrito a mano.
+        val lines = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = max(1f, 0.8f * dp)
+            color = 0x26000000
+        }
+        val textTop = stamp.bottom + pad * 0.6f
+        val lineGap = max(14 * dp, (side.bottom - textTop) / 3.2f)
+        val hand = textPaint(Color.rgb(0x2E, 0x2A, 0x6B), Typeface.create("cursive", Typeface.NORMAL)).apply {
+            textSize = min(lineGap * 0.62f, 20 * dp)
+        }
+        var y = textTop + lineGap
+        val words = caption.orEmpty().split(" ").filter { it.isNotEmpty() }.toMutableList()
+        while (y <= side.bottom + 1) {
+            canvas.drawLine(side.left, y, side.right, y, lines)
+            // Las palabras que entren en este renglón.
+            var text = ""
+            while (words.isNotEmpty() && hand.measureText(if (text.isEmpty()) words[0] else "$text ${words[0]}") <= side.width()) {
+                text = if (text.isEmpty()) words.removeAt(0) else "$text ${words.removeAt(0)}"
+            }
+            if (text.isNotEmpty()) canvas.drawText(text, side.left + 2 * dp, y - lineGap * 0.18f, hand)
+            y += lineGap
         }
     }
 
