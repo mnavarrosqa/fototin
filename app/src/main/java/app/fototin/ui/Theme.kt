@@ -82,6 +82,7 @@ private val Base = Typography()
 // Títulos sin serif, gruesos y un poco más juntos, como en las apps actuales.
 private val AppTypography = Base.copy(
     displaySmall = Base.displaySmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+    headlineLarge = Base.headlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
     headlineSmall = Base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.25).sp),
     titleLarge = Base.titleLarge.copy(fontWeight = FontWeight.Bold),
     titleMedium = Base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
