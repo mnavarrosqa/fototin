@@ -133,6 +133,38 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /** Diálogo abierto en la pantalla principal. */
 private sealed interface Dialog {
@@ -191,6 +223,8 @@ fun MainScreen(
     val checkingUpdates by viewModel.checkingUpdates.collectAsState()
     val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
     val favoritesOnly by viewModel.favoritesOnly.collectAsState()
+    val searching by viewModel.searching.collectAsState()
+    val query by viewModel.query.collectAsState()
     var addMenu by remember { mutableStateOf(false) }
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
@@ -220,9 +254,10 @@ fun MainScreen(
 
     val selecting = selection.isNotEmpty()
     // Atrás: primero cancela la selección, después vuelve a Fotos y por último sale del álbum.
-    BackHandler(enabled = selecting || tab != Tab.PHOTOS || currentAlbum != null || favoritesOnly) {
+    BackHandler(enabled = selecting || tab != Tab.PHOTOS || currentAlbum != null || favoritesOnly || searching) {
         when {
             selecting -> viewModel.clearSelection()
+            searching && tab == Tab.PHOTOS -> viewModel.closeSearch()
             tab != Tab.PHOTOS -> tab = Tab.PHOTOS
             else -> viewModel.openAlbum(null)
         }
@@ -370,6 +405,12 @@ fun MainScreen(
                         onDeleteAlbum = { dialog = Dialog.DeleteAlbum(it) },
                         onOpenPhoto = viewModel::openPhoto,
                         onToggleSelection = viewModel::toggleSelection,
+                        onSelectRange = viewModel::selectRange,
+                        searching = searching,
+                        query = query,
+                        onOpenSearch = viewModel::openSearch,
+                        onQuery = viewModel::setQuery,
+                        onCloseSearch = viewModel::closeSearch,
                         onSlideshow = onSlideshow,
                     )
                     Tab.WIDGETS -> WidgetsTab(
@@ -664,6 +705,12 @@ private fun PhotosTab(
     onDeleteAlbum: (Album) -> Unit,
     onOpenPhoto: (String) -> Unit,
     onToggleSelection: (String) -> Unit,
+    onSelectRange: (Set<String>, List<String>) -> Unit,
+    searching: Boolean,
+    query: String,
+    onOpenSearch: () -> Unit,
+    onQuery: (String) -> Unit,
+    onCloseSearch: () -> Unit,
     onSlideshow: (List<Photo>, WidgetSource) -> Unit,
 ) {
     val selecting = selection.isNotEmpty()
@@ -679,6 +726,108 @@ private fun PhotosTab(
         else -> WidgetSource.All
     }
     val side = Modifier.padding(horizontal = 16.dp)
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    // Posición de cada foto en la lista y, para saltar por fecha, dónde empieza cada año.
+    val positions = remember(visible) { visible.withIndex().associate { (i, photo) -> photo.id to i } }
+    val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
+    val groupStarts = remember(visible, sortByTaken) {
+        if (!sortByTaken) emptyList() else groups.runningFold(0) { start, (_, group) -> start + group.size }.dropLast(1)
+    }
+    // Índice en la grilla de la foto número [position]: lo que hay antes (títulos, tarjetas) más
+    // un separador por cada año que empezó hasta ahí.
+    val gridIndexOf: (Int) -> Int = { position ->
+        val total = gridState.layoutInfo.totalItemsCount
+        val before = (total - visible.size - groupStarts.size).coerceAtLeast(0)
+        before + groupStarts.count { it <= position } + position
+    }
+
+    // Elegir varias arrastrando el dedo, como en las galerías: se mantiene presionada una foto y
+    // se desliza; cerca de los bordes la grilla se mueve sola.
+    val drag = remember { DragSelect() }
+    val currentVisible by rememberUpdatedState(visible)
+    val currentPositions by rememberUpdatedState(positions)
+    val currentSelection by rememberUpdatedState(selection)
+    val currentOnTap by rememberUpdatedState<(String) -> Unit> { id ->
+        if (currentSelection.isNotEmpty()) onToggleSelection(id) else onOpenPhoto(id)
+    }
+    val currentOnToggle by rememberUpdatedState(onToggleSelection)
+    val currentOnRange by rememberUpdatedState(onSelectRange)
+    fun photoAt(position: Offset): String? {
+        val info = gridState.layoutInfo
+        // Las posiciones de la grilla se cuentan desde donde termina el margen de arriba.
+        val y = position.y.toInt() + info.viewportStartOffset
+        val x = position.x.toInt()
+        return info.visibleItemsInfo.firstOrNull { item ->
+            y in item.offset.y until item.offset.y + item.size.height &&
+                x in item.offset.x until item.offset.x + item.size.width
+        }?.key?.let { key -> (key as? String)?.takeIf { it in currentPositions } }
+    }
+    fun extendDrag() {
+        val id = photoAt(drag.position) ?: return
+        val end = currentPositions[id] ?: return
+        if (drag.start < 0 || (end == drag.start && !drag.moved)) return
+        drag.moved = true
+        val range = currentVisible.subList(minOf(drag.start, end), maxOf(drag.start, end) + 1).map { it.id }
+        currentOnRange(drag.base, range)
+    }
+    LaunchedEffect(drag.speed) {
+        while (drag.speed != 0f) {
+            gridState.scrollBy(drag.speed)
+            extendDrag()
+            delay(16)
+        }
+    }
+    val gestures = Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val startId = photoAt(down.position) ?: return@awaitEachGesture
+            // Hasta que se cumple el tiempo de mantener presionado: si se suelta es un toque, si se
+            // mueve es la grilla que se desplaza.
+            val tapped = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                var result: Boolean? = null
+                while (result == null) {
+                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    result = when {
+                        change == null -> false
+                        change.changedToUp() -> !change.isConsumed
+                        change.isConsumed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop -> false
+                        else -> null
+                    }
+                }
+                result
+            }
+            if (tapped != null) {
+                if (tapped) currentOnTap(startId)
+                return@awaitEachGesture
+            }
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            drag.base = currentSelection - startId
+            drag.start = currentPositions[startId] ?: -1
+            drag.moved = false
+            drag.position = down.position
+            currentOnToggle(startId)
+            val edge = 72.dp.toPx()
+            while (true) {
+                // Se toman los movimientos antes que la grilla, para que no se desplace mientras se elige.
+                val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                change.consume()
+                if (!change.pressed) break
+                drag.position = change.position
+                drag.speed = when {
+                    change.position.y < edge -> -((edge - change.position.y) / edge * 24f).coerceIn(4f, 24f).roundToInt().toFloat()
+                    change.position.y > size.height - edge ->
+                        ((change.position.y - (size.height - edge)) / edge * 24f).coerceIn(4f, 24f).roundToInt().toFloat()
+                    else -> 0f
+                }
+                extendDrag()
+            }
+            drag.speed = 0f
+            drag.start = -1
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         // Las fotos van de borde a borde, con separaciones finas; los títulos y tarjetas llevan margen.
         LazyVerticalStaggeredGrid(
@@ -690,13 +839,14 @@ private fun PhotosTab(
             ),
             horizontalArrangement = Arrangement.spacedBy(GRID_GAP),
             verticalItemSpacing = GRID_GAP,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(gestures),
         ) {
             if (!selecting) {
                 item(span = StaggeredGridItemSpan.FullLine) {
                     LargeHeader(
                         title = title,
-                        subtitle = headerSubtitle(visible, sortByTaken),
+                        subtitle = if (query.isNotBlank()) resultCount(visible.size) else headerSubtitle(visible, sortByTaken),
+                        onSearch = onOpenSearch.takeIf { !searching && photos.isNotEmpty() },
                         album = currentAlbum,
                         showActions = visible.isNotEmpty() || currentAlbum != null,
                         sortByTaken = sortByTaken,
@@ -708,14 +858,19 @@ private fun PhotosTab(
                         onSlideshow = { onSlideshow(visible, source) }.takeIf { visible.isNotEmpty() },
                     )
                 }
-                if (memories.isNotEmpty() && currentAlbum == null && !favoritesOnly) {
+                if (searching) {
+                    item(key = "search", span = StaggeredGridItemSpan.FullLine) {
+                        SearchField(query, onQuery = onQuery, onClose = onCloseSearch, modifier = side.padding(bottom = 8.dp))
+                    }
+                }
+                if (memories.isNotEmpty() && currentAlbum == null && !favoritesOnly && !searching) {
                     item(span = StaggeredGridItemSpan.FullLine) {
                         // Tocar los recuerdos de hoy los pasa como presentación.
                         MemoriesHero(memories, onPlay = { onSlideshow(memories, WidgetSource.Memories) }, modifier = side)
                     }
                 }
             }
-            if (photos.isNotEmpty()) {
+            if (photos.isNotEmpty() && !searching) {
                 item(span = StaggeredGridItemSpan.FullLine) {
                     Collections(
                         photos = photos,
@@ -751,6 +906,11 @@ private fun PhotosTab(
             if (visible.isEmpty() && importing == null) {
                 item(span = StaggeredGridItemSpan.FullLine) {
                     when {
+                        query.isNotBlank() -> EmptyCollection(
+                            "No hay fotos que coincidan con «${query.trim()}». Probá con una palabra de una nota, " +
+                                "un mes (por ejemplo «marzo») o un año.",
+                        )
+                        searching -> EmptyCollection("Escribí una palabra de una nota, un mes o un año.")
                         favoritesOnly -> EmptyCollection(
                             "Todavía no tenés favoritas. Abrí una foto y tocá el corazón para sumarla acá.",
                         )
@@ -766,7 +926,6 @@ private fun PhotosTab(
                 item(span = StaggeredGridItemSpan.FullLine) { Spacer(Modifier.height(8.dp)) }
             }
             // Ordenadas por fecha de la foto, con un separador por año.
-            val groups = if (sortByTaken) visible.groupBy { yearOf(it.takenAt) }.toList() else listOf(null to visible)
             groups.forEach { (year, group) ->
                 if (year != null) {
                     item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
@@ -783,6 +942,7 @@ private fun PhotosTab(
                     }
                 }
                 items(group, key = { it.id }) { photo ->
+                    // Los toques los atiende la grilla (ver arriba), para poder elegir arrastrando.
                     PhotoTile(
                         photo = photo,
                         selected = photo.id in selection,
@@ -798,7 +958,16 @@ private fun PhotosTab(
 
         // Al bajar, el título grande pasa a una barra compacta y translúcida. Tocarla vuelve arriba.
         val collapsed by remember { derivedStateOf { gridState.firstVisibleItemIndex > 0 } }
-        val scope = rememberCoroutineScope()
+        if (visible.size >= SCRUBBER_MIN_PHOTOS) {
+            DateScrubber(
+                gridState = gridState,
+                visible = visible,
+                gridIndexOf = gridIndexOf,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = padding.calculateTopPadding() + 64.dp, bottom = padding.calculateBottomPadding() + 16.dp),
+            )
+        }
         AnimatedVisibility(
             visible = collapsed && !selecting,
             enter = fadeIn() + slideInVertically { -it / 2 },
@@ -812,6 +981,158 @@ private fun PhotosTab(
 
 /** Separación entre fotos de la grilla. */
 private val GRID_GAP = 2.dp
+
+/** Con menos fotos que estas no hace falta la barra para saltar de fecha. */
+private const val SCRUBBER_MIN_PHOTOS = 40
+
+/** Estado de la elección arrastrando el dedo. */
+private class DragSelect {
+    /** Lo que ya estaba elegido antes de empezar a arrastrar. */
+    var base: Set<String> = emptySet()
+    /** Posición (en la lista de fotos) de la foto donde se empezó; -1 si no se está arrastrando. */
+    var start = -1
+    var moved = false
+    var position = Offset.Zero
+    /** Velocidad del desplazamiento automático cerca de los bordes, en píxeles por cuadro. */
+    var speed by mutableFloatStateOf(0f)
+}
+
+private fun resultCount(count: Int) = when (count) {
+    0 -> "Sin resultados"
+    1 -> "1 foto encontrada"
+    else -> "$count fotos encontradas"
+}
+
+/** Campo de búsqueda: palabras de la nota, un mes o un año. */
+@Composable
+private fun SearchField(query: String, onQuery: (String) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    TextField(
+        value = query,
+        onValueChange = onQuery,
+        placeholder = { Text("Buscar por nota, mes o año") },
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = {
+            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Cerrar búsqueda") }
+        },
+        singleLine = true,
+        shape = CircleShape,
+        colors = TextFieldDefaults.colors(
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+        modifier = modifier.fillMaxWidth().focusRequester(focus),
+    )
+}
+
+/**
+ * Barra para saltar por fecha, en el borde derecho. Aparece al desplazarse; al arrastrarla muestra
+ * el mes y el año de las fotos a las que se va a llegar.
+ */
+@Composable
+private fun DateScrubber(
+    gridState: LazyStaggeredGridState,
+    visible: List<Photo>,
+    gridIndexOf: (Int) -> Int,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    var dragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+    var shown by remember { mutableStateOf(false) }
+    val scrolling = gridState.isScrollInProgress
+    LaunchedEffect(scrolling, dragging) {
+        if (scrolling || dragging) shown = true else {
+            delay(1500)
+            shown = false
+        }
+    }
+    val scrollFraction by remember {
+        derivedStateOf {
+            val total = gridState.layoutInfo.totalItemsCount
+            if (total <= 1) 0f else gridState.firstVisibleItemIndex.toFloat() / (total - 1)
+        }
+    }
+    val alpha by animateFloatAsState(if (shown) 1f else 0f, label = "scrubber")
+    if (alpha == 0f) return
+    val currentVisible by rememberUpdatedState(visible)
+    val currentGridIndexOf by rememberUpdatedState(gridIndexOf)
+    BoxWithConstraints(modifier.fillMaxHeight().width(160.dp).graphicsLayer { this.alpha = alpha }) {
+        val thumbHeight = 48.dp
+        val track = constraints.maxHeight.toFloat() - with(LocalDensity.current) { thumbHeight.toPx() }
+        val fraction = if (dragging) dragFraction else scrollFraction.coerceIn(0f, 1f)
+        val position = (fraction * (visible.size - 1)).roundToInt().coerceIn(0, visible.lastIndex)
+        var lastPosition by remember { mutableIntStateOf(-1) }
+        fun jumpTo(y: Float, half: Float) {
+            dragFraction = if (track <= 0f) 0f else ((y - half) / track).coerceIn(0f, 1f)
+            val target = (dragFraction * (currentVisible.size - 1)).roundToInt().coerceIn(0, currentVisible.lastIndex)
+            if (target != lastPosition) {
+                lastPosition = target
+                scope.launch { gridState.scrollToItem(currentGridIndexOf(target)) }
+            }
+        }
+        Row(
+            Modifier.offset { IntOffset(0, (fraction * track).roundToInt()) }.align(Alignment.TopEnd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (dragging) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shadowElevation = 6.dp,
+                ) {
+                    Text(
+                        monthYear(visible[position].takenAt),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            Surface(
+                shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                shadowElevation = 4.dp,
+                modifier = Modifier
+                    .size(width = 32.dp, height = thumbHeight)
+                    .pointerInput(Unit) {
+                        val half = thumbHeight.toPx() / 2
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                dragging = true
+                                lastPosition = -1
+                                dragFraction = scrollFraction.coerceIn(0f, 1f)
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            },
+                            onDragEnd = { dragging = false },
+                            onDragCancel = { dragging = false },
+                            onVerticalDrag = { change, _ ->
+                                change.consume()
+                                // La posición del dedo es relativa a la manija, que se mueve con él.
+                                jumpTo(dragFraction * track + change.position.y, half)
+                            },
+                        )
+                    }
+                    .semantics { contentDescription = "Saltar por fecha" },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(painterResource(R.drawable.ic_drag_handle), contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+private val MONTH_YEAR = java.text.SimpleDateFormat("MMM yyyy", java.util.Locale("es"))
+
+private fun monthYear(millis: Long): String = synchronized(MONTH_YEAR) { MONTH_YEAR.format(java.util.Date(millis)) }
 
 private fun photoCount(count: Int) = if (count == 1) "1 foto" else "$count fotos"
 
@@ -831,6 +1152,7 @@ private fun headerSubtitle(visible: List<Photo>, sortByTaken: Boolean): String? 
 private fun LargeHeader(
     title: String,
     subtitle: String?,
+    onSearch: (() -> Unit)?,
     album: Album?,
     showActions: Boolean,
     sortByTaken: Boolean,
@@ -853,6 +1175,11 @@ private fun LargeHeader(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        if (onSearch != null) {
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Filled.Search, contentDescription = "Buscar")
             }
         }
         if (onSlideshow != null) {
@@ -1349,7 +1676,6 @@ private fun PhotoTile(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
     val inset by animateDpAsState(if (selected) 10.dp else 0.dp, label = "inset")
     val corner by animateDpAsState(if (selected) 16.dp else 3.dp, label = "corner")
     Box(
@@ -1357,13 +1683,18 @@ private fun PhotoTile(
             .fillMaxWidth()
             // Cuadradas, como en las galerías: la grilla queda pareja y entran más.
             .aspectRatio(1f)
-            .combinedClickable(
-                onClick = { if (selecting) onToggle() else onOpen() },
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            // Los toques llegan desde la grilla; esto es para TalkBack.
+            .semantics(mergeDescendants = true) {
+                this.selected = selected
+                onClick(label = if (selecting) "Elegir" else "Abrir") {
+                    if (selecting) onToggle() else onOpen()
+                    true
+                }
+                onLongClick(label = "Elegir varias") {
                     onToggle()
-                },
-            ),
+                    true
+                }
+            },
     ) {
         AsyncImage(
             model = photo.thumb.takeIf { it.exists() } ?: photo.file,
