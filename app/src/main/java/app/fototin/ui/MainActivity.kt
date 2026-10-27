@@ -16,6 +16,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.IntentCompat
 import app.fototin.config.WidgetConfigActivity
+import app.fototin.data.GooglePhotosPicker
+import androidx.activity.result.IntentSenderRequest
+import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -41,11 +48,46 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::restore) }
 
+    // Si Google necesita mostrar la pantalla de permiso, vuelve por acá con el resultado.
+    private val googleAuth = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data) }
+            .onSuccess { auth -> auth.accessToken?.let(viewModel::pickFromGooglePhotos) }
+            .onFailure { viewModel.showMessage("No se pudo conectar con Google Fotos") }
+    }
+
+    /** Pide permiso para leer las fotos que el usuario elija en Google Fotos y arranca la elección. */
+    private fun pickFromGooglePhotos() {
+        val request = AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(Scope(GooglePhotosPicker.SCOPE)))
+            .build()
+        Identity.getAuthorizationClient(this).authorize(request)
+            .addOnSuccessListener { result ->
+                val pending = result.pendingIntent
+                if (result.hasResolution() && pending != null) {
+                    googleAuth.launch(IntentSenderRequest.Builder(pending.intentSender).build())
+                } else {
+                    result.accessToken?.let(viewModel::pickFromGooglePhotos)
+                }
+            }
+            .addOnFailureListener { e ->
+                viewModel.showMessage("No se pudo conectar con Google: ${e.message ?: "error desconocido"}")
+            }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RotationScheduler.schedule(this)
         if (savedInstanceState == null) handleShare(intent)
+        lifecycleScope.launch {
+            viewModel.openUrl.collect { url ->
+                // Si está instalada, el enlace abre la app de Google Fotos; si no, el navegador.
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                    .onFailure { viewModel.showMessage("No se pudo abrir Google Fotos") }
+            }
+        }
 
         setContent {
             val dynamicColor by viewModel.dynamicColor.collectAsState()
@@ -57,6 +99,7 @@ class MainActivity : ComponentActivity() {
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
+                    onPickGooglePhotos = ::pickFromGooglePhotos,
                     onAddWidget = ::requestPinWidget,
                     onEditWidget = { id ->
                         startActivity(

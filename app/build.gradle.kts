@@ -17,26 +17,33 @@ android {
         versionName = "0.2.${versionCode}"
     }
 
+    // La clave de firma no está en el repo: GitHub Actions la arma desde los secrets
+    // FOTOTIN_KEYSTORE_BASE64 y FOTOTIN_KEYSTORE_PASSWORD (ver .github/workflows/build.yml).
+    // Sin esas variables (por ejemplo, al compilar en otra computadora) se usa la clave de debug,
+    // y ese APK no se puede instalar encima del oficial.
+    val releaseKeystore = System.getenv("FOTOTIN_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
-        // Clave fija incluida en el repo para que cada APK de CI se pueda instalar como
-        // actualización del anterior. Para publicar en Play Store hay que usar una clave privada.
-        create("fototin") {
-            storeFile = file("fototin.keystore")
-            storePassword = "fototin"
-            keyAlias = "fototin"
-            keyPassword = "fototin"
+        if (releaseKeystore != null) {
+            create("fototin") {
+                storeFile = releaseKeystore
+                storeType = "PKCS12"
+                storePassword = System.getenv("FOTOTIN_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("FOTOTIN_KEY_ALIAS") ?: "fototin"
+                keyPassword = System.getenv("FOTOTIN_KEYSTORE_PASSWORD")
+            }
         }
     }
+    val signing = signingConfigs.findByName("fototin") ?: signingConfigs.getByName("debug")
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("fototin")
+            signingConfig = signing
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("fototin")
+            signingConfig = signing
         }
     }
     compileOptions {
@@ -58,6 +65,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.window)
+    implementation(libs.play.services.auth)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

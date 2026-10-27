@@ -136,7 +136,15 @@ class PhotoRepository(context: Context) {
      * Importa las fotos de a varias a la vez. Las que ya estaban (mismo archivo original) se
      * saltean.
      */
-    suspend fun import(uris: List<Uri>, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): ImportResult =
+    /**
+     * @param takenAtByUri fecha de cada foto cuando se conoce por otro lado (por ejemplo, la que
+     * informa Google Fotos, porque las copias descargadas vienen sin EXIF).
+     */
+    suspend fun import(
+        uris: List<Uri>,
+        takenAtByUri: Map<Uri, Long> = emptyMap(),
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): ImportResult =
         withContext(Dispatchers.IO) {
             val done = AtomicInteger()
             val duplicates = AtomicInteger()
@@ -164,7 +172,7 @@ class PhotoRepository(context: Context) {
                         permits.withPermit {
                             runCatching {
                                 val hash = fingerprint(uri)
-                                val entry = if (hash != null && !knownFiles.add(hash)) null else importOne(uri, hash, isNewImage)
+                                val entry = if (hash != null && !knownFiles.add(hash)) null else importOne(uri, hash, isNewImage, takenAtByUri[uri])
                                 if (entry == null) duplicates.incrementAndGet()
                                 entry
                             }.also { onProgress(done.incrementAndGet(), uris.size) }
@@ -316,7 +324,7 @@ class PhotoRepository(context: Context) {
     }.getOrNull()
 
     /** Devuelve null si [isNewImage] dice que la foto ya está (y entonces no guarda nada). */
-    private fun importOne(uri: Uri, hash: String?, isNewImage: (Fingerprint) -> Boolean): Entry? {
+    private fun importOne(uri: Uri, hash: String?, isNewImage: (Fingerprint) -> Boolean, knownTakenAt: Long?): Entry? {
         val resolver = appContext.contentResolver
         // ImageDecoder ya aplica la rotación EXIF.
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
@@ -340,7 +348,7 @@ class PhotoRepository(context: Context) {
         saveThumb(bitmap, thumbFile(id))
         val (fx, fy) = FocusFinder.find(bitmap)
         val entry = Entry(
-            id, bitmap.width, bitmap.height, takenAt(uri) ?: System.currentTimeMillis(), fx, fy,
+            id, bitmap.width, bitmap.height, knownTakenAt ?: takenAt(uri) ?: System.currentTimeMillis(), fx, fy,
             hash = hash, visualHash = visual,
         )
         bitmap.recycle()

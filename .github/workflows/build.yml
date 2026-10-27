@@ -18,9 +18,25 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      # La clave de firma vive en los secrets del repo, no en el código.
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FOTOTIN_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/fototin-release.p12"
+            echo "FOTOTIN_KEYSTORE_FILE=$RUNNER_TEMP/fototin-release.p12" >> "$GITHUB_ENV"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "::error::Falta el secret FOTOTIN_KEYSTORE_BASE64: no se publica un APK que no se pueda instalar encima del anterior."
+            exit 1
+          else
+            echo "::warning::Sin clave de firma: este APK se firma con la clave de debug."
+          fi
       - name: Run tests
         run: ./gradlew testReleaseUnitTest
       - name: Build release APK
+        env:
+          FOTOTIN_KEYSTORE_PASSWORD: ${{ secrets.FOTOTIN_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk fototin.apk

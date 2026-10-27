@@ -79,6 +79,7 @@ Requiere JDK 17 y el SDK de Android (API 35).
 El APK queda en `app/build/outputs/apk/release/app-release.apk`. GitHub Actions lo compila en
 cada push y, en `main`, lo publica como release.
 
-Los APK se firman con `app/fototin.keystore`, una clave incluida en el repo para que cada versión
-se instale encima de la anterior. Sirve para uso personal; para publicar en Play Store hay que
-firmar con una clave privada.
+Los APK oficiales se firman con una clave privada que no está en el repo: GitHub Actions la toma
+de los secrets `FOTOTIN_KEYSTORE_BASE64` (el archivo .p12 en base64) y
+`FOTOTIN_KEYSTORE_PASSWORD`. Sin esos secrets, el build usa la clave de debug y en `main` no se
+publica nada.

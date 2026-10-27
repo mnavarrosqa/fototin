@@ -187,9 +187,9 @@ fun SettingsTab(
         item {
             SettingsCard("Fotos de Google Fotos") {
                 Text(
-                    "• En «Agregar fotos», el selector muestra también tus fotos de Google Fotos si está " +
-                        "activado. Si no aparecen, buscá en los ajustes del teléfono «Selector de fotos» o " +
-                        "«Contenido multimedia en la nube» y elegí Google Fotos.\n" +
+                    "• «Agregar fotos» → «Desde Google Fotos»: se abre Google Fotos, elegís las fotos, " +
+                        "tocás «Listo» y volvés a Fototin. La primera vez Google te pide permiso: Fototin solo " +
+                        "puede ver las fotos que elijas.\n" +
                         "• O abrí Google Fotos, elegí una o varias fotos y tocá Compartir → Fototin.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -203,7 +203,7 @@ fun SettingsTab(
                 runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
             }
             Text(
-                "Fototin ${version ?: ""}\nTus fotos se guardan solo en este teléfono.",
+                "Fototin ${version ?: ""}\nTus fotos se guardan solo en este teléfono. Fototin solo se conecta a internet para traer las que elijas de Google Fotos.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
