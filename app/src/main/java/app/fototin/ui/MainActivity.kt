@@ -23,6 +23,7 @@ import android.os.Build
 import androidx.activity.result.IntentSenderRequest
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.launch
@@ -52,22 +53,23 @@ class MainActivity : ComponentActivity() {
     ) { uri -> uri?.let(viewModel::restore) }
 
     /** Qué hacer con el permiso de Google cuando llegue (empezar o retomar una elección). */
-    private var onGoogleToken: ((String) -> Unit)? = null
+    private var onGoogleToken: ((token: String, account: String?) -> Unit)? = null
 
     // Si Google necesita mostrar la pantalla de permiso, vuelve por acá con el resultado.
     private val googleAuth = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data) }
-            .onSuccess { auth -> auth.accessToken?.let { token -> onGoogleToken?.invoke(token) } }
+            .onSuccess { auth -> auth.accessToken?.let { token -> onGoogleToken?.invoke(token, accountOf(auth)) } }
             .onFailure { viewModel.showMessage("No se pudo conectar con Google Fotos") }
     }
 
     /** Pide permiso para leer las fotos que el usuario elija en Google Fotos. */
-    private fun authorizeGoogle(onToken: (String) -> Unit) {
+    private fun authorizeGoogle(onToken: (token: String, account: String?) -> Unit) {
         onGoogleToken = onToken
         val request = AuthorizationRequest.builder()
-            .setRequestedScopes(listOf(Scope(GooglePhotosPicker.SCOPE)))
+            // El correo sirve para decirle al usuario con qué cuenta tiene que elegir las fotos.
+            .setRequestedScopes(listOf(Scope(GooglePhotosPicker.SCOPE), Scope("email")))
             .build()
         Identity.getAuthorizationClient(this).authorize(request)
             .addOnSuccessListener { result ->
@@ -75,13 +77,16 @@ class MainActivity : ComponentActivity() {
                 if (result.hasResolution() && pending != null) {
                     googleAuth.launch(IntentSenderRequest.Builder(pending.intentSender).build())
                 } else {
-                    result.accessToken?.let(onToken)
+                    result.accessToken?.let { onToken(it, accountOf(result)) }
                 }
             }
             .addOnFailureListener { e ->
                 viewModel.showMessage("No se pudo conectar con Google: ${e.message ?: "error desconocido"}")
             }
     }
+
+    private fun accountOf(result: AuthorizationResult): String? =
+        runCatching { result.toGoogleSignInAccount()?.email }.getOrNull()
 
     private fun pickFromGooglePhotos() = authorizeGoogle(viewModel::pickFromGooglePhotos)
 
@@ -125,6 +130,17 @@ class MainActivity : ComponentActivity() {
                 // Si está instalada, el enlace abre la app de Google Fotos; si no, el navegador.
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                     .onFailure { viewModel.showMessage("No se pudo abrir Google Fotos") }
+            }
+        }
+        lifecycleScope.launch {
+            viewModel.openInBrowser.collect { url ->
+                // El selector obliga a usar un navegador aunque la app de Google Fotos reclame el enlace.
+                val browser = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    selector = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER)
+                }
+                runCatching { startActivity(browser) }
+                    .recoverCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                    .onFailure { viewModel.showMessage("No se pudo abrir el navegador") }
             }
         }
 
