@@ -43,6 +43,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import android.util.Log
 import java.io.File
+import java.io.IOException
 
 /** Una versión nueva: disponible para instalar o descargándose. */
 sealed interface UpdateState {
@@ -300,8 +301,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     withTimeoutOrNull(session.pollIntervalMs) { pickerPokes.receive() }
                     val asked = manualPickerCheck || resumedPickerCheck
                     if (asked) _googlePhotos.value = "Consultando a Google Fotos…"
-                    session = picker.getSession(session.id)
+                    // Al volver de Google Fotos la red puede tardar en reconectarse: un corte no
+                    // cancela la elección, se vuelve a consultar en la próxima vuelta.
+                    session = try {
+                        picker.getSession(session.id)
+                    } catch (e: GooglePhotosPicker.PickerException) {
+                        throw e
+                    } catch (e: IOException) {
+                        Log.w(TAG, "Sin conexión al consultar la sesión", e)
+                        _googlePhotos.value = "Sin conexión con Google Fotos. Reintentando…"
+                        manualPickerCheck = false
+                        resumedPickerCheck = false
+                        continue
+                    }
                     Log.d(TAG, "Sesión ${session.id}: elegidas=${session.ready}")
+                    if (session.ready) break
                     if (!session.ready && asked) {
                         // Volvió a la app (o tocó el botón) y Google todavía no tiene la elección:
                         // casi siempre es porque Google Fotos está abierto con otra cuenta.
@@ -312,7 +326,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     resumedPickerCheck = false
                 }
                 _googlePhotos.value = "Trayendo las fotos elegidas…"
-                val items = picker.listItems(session.id).filter { it.isPhoto }
+                val items = retryingNetwork { picker.listItems(session.id) }.filter { it.isPhoto }
                 Log.d(TAG, "Fotos elegidas: ${items.size}")
                 if (items.isEmpty()) {
                     finished = true
@@ -322,7 +336,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _googlePhotos.value = null
                 _importing.value = ImportProgress(0, items.size * 2)
                 val downloaded = items.mapIndexedNotNull { i, item ->
-                    runCatching { picker.download(item, cache) }
+                    runCatching { retryingNetwork { picker.download(item, cache) } }
                         .onFailure { Log.w(TAG, "No se pudo descargar ${item.id}", it) }
                         .getOrNull()
                         ?.let { Uri.fromFile(it) to item.createdAt }
@@ -349,6 +363,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         else -> "Google Fotos (${e.code}): ${e.message}"
                     },
                 )
+            } catch (e: IOException) {
+                // Sin conexión: la elección queda guardada y se retoma al volver a abrir Fototin.
+                Log.w(TAG, "Sin conexión con Google Fotos", e)
+                _messages.tryEmit("No hay conexión con Google Fotos. Cuando vuelva, abrí Fototin de nuevo y se retoma la elección.")
             } catch (e: Exception) {
                 finished = true
                 Log.w(TAG, "No se pudieron traer las fotos", e)
@@ -367,6 +385,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 cache.listFiles()?.forEach { it.delete() }
             }
         }
+    }
+
+    /** Reintenta [block] si falla la red (no si Google responde con un error), esperando cada vez más. */
+    private suspend fun <T> retryingNetwork(times: Int = 4, block: suspend () -> T): T {
+        var wait = 1_000L
+        repeat(times - 1) {
+            try {
+                return block()
+            } catch (e: GooglePhotosPicker.PickerException) {
+                throw e
+            } catch (e: IOException) {
+                Log.w(TAG, "Falló la red, reintentando en $wait ms", e)
+                delay(wait)
+                wait *= 2
+            }
+        }
+        return block()
     }
 
     /** Vuelve a abrir la pantalla de Google Fotos de la elección en curso. */
