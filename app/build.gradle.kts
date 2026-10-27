@@ -65,6 +65,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.window)
+    implementation(libs.play.services.auth)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import app.fototin.data.Album
 import app.fototin.data.AlbumRepository
 import app.fototin.data.BackupManager
+import app.fototin.data.GooglePhotosPicker
 import app.fototin.data.ImportResult
 import app.fototin.data.Photo
 import app.fototin.data.PhotoPool
@@ -17,6 +18,7 @@ import app.fototin.widget.PlacedWidget
 import app.fototin.widget.RotationScheduler
 import app.fototin.widget.WidgetSupport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** Un borrado reciente que todavía se puede deshacer. */
 class UndoDelete(val message: String, val removed: RemovedPhotos)
@@ -137,6 +140,96 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refresh()
             _messages.tryEmit(importMessage(result))
         }
+    }
+
+    private var googleJob: Job? = null
+
+    /** Texto de estado mientras se eligen o descargan fotos de Google Fotos; null si no hay nada en curso. */
+    private val _googlePhotos = MutableStateFlow<String?>(null)
+    val googlePhotos: StateFlow<String?> = _googlePhotos.asStateFlow()
+
+    /** Pantallas de Google Fotos que la actividad tiene que abrir. */
+    private val _openUrl = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val openUrl: SharedFlow<String> = _openUrl.asSharedFlow()
+
+    private var pickerUri: String? = null
+
+    /**
+     * Abre la pantalla de Google Fotos para elegir fotos y, cuando el usuario termina, las descarga
+     * e importa. [token] es el permiso que dio el usuario (solo lectura de lo que elija).
+     */
+    fun pickFromGooglePhotos(token: String) {
+        googleJob?.cancel()
+        val albumId = _currentAlbumId.value
+        googleJob = viewModelScope.launch {
+            val picker = GooglePhotosPicker(token)
+            var sessionId: String? = null
+            val cache = File(getApplication<Application>().cacheDir, "gphotos").apply { mkdirs() }
+            try {
+                _googlePhotos.value = "Abriendo Google Fotos…"
+                var session = picker.createSession()
+                sessionId = session.id
+                pickerUri = session.pickerUri
+                _openUrl.tryEmit(session.pickerUri)
+                _googlePhotos.value = "Elegí las fotos en Google Fotos y tocá «Listo». Después volvé a Fototin."
+                // Google avisa por la sesión cuándo terminó la elección: se consulta cada pocos segundos.
+                val deadline = System.currentTimeMillis() + session.timeoutMs
+                while (!session.ready) {
+                    if (System.currentTimeMillis() > deadline) error("Se venció el tiempo para elegir las fotos")
+                    delay(session.pollIntervalMs)
+                    session = picker.getSession(session.id)
+                }
+                val items = picker.listItems(session.id).filter { it.isPhoto }
+                if (items.isEmpty()) {
+                    _messages.tryEmit("No elegiste fotos")
+                    return@launch
+                }
+                _googlePhotos.value = null
+                _importing.value = ImportProgress(0, items.size * 2)
+                val downloaded = items.mapIndexedNotNull { i, item ->
+                    runCatching { picker.download(item, cache) }.getOrNull()
+                        ?.let { Uri.fromFile(it) to item.createdAt }
+                        .also { _importing.value = ImportProgress(i + 1, items.size * 2) }
+                }
+                val takenAt = downloaded.mapNotNull { (uri, at) -> at?.let { uri to it } }.toMap()
+                val result = repository.import(downloaded.map { it.first }, takenAt) { done, _ ->
+                    _importing.value = ImportProgress(items.size + done, items.size * 2)
+                }
+                if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, result.ids) }
+                refresh()
+                _messages.tryEmit(importMessage(result.copy(failed = result.failed + items.size - downloaded.size)))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: GooglePhotosPicker.PickerException) {
+                _messages.tryEmit(
+                    when (e.code) {
+                        401, 403 -> "Google Fotos no dio permiso. Revisá que tu cuenta sea usuario de prueba del proyecto."
+                        else -> "Google Fotos: ${e.message}"
+                    },
+                )
+            } catch (e: Exception) {
+                _messages.tryEmit("No se pudieron traer las fotos: ${e.message ?: "sin conexión"}")
+            } finally {
+                _googlePhotos.value = null
+                _importing.value = null
+                pickerUri = null
+                sessionId?.let { id -> viewModelScope.launch { picker.deleteSession(id) } }
+                cache.listFiles()?.forEach { it.delete() }
+            }
+        }
+    }
+
+    /** Vuelve a abrir la pantalla de Google Fotos de la elección en curso. */
+    fun reopenGooglePhotos() {
+        pickerUri?.let { _openUrl.tryEmit(it) }
+    }
+
+    fun cancelGooglePhotos() {
+        googleJob?.cancel()
+    }
+
+    fun showMessage(text: String) {
+        _messages.tryEmit(text)
     }
 
     fun openPhoto(id: String?) {

@@ -136,6 +136,7 @@ private enum class Tab(val label: String) {
 fun MainScreen(
     viewModel: MainViewModel,
     onPickPhotos: () -> Unit,
+    onPickGooglePhotos: () -> Unit,
     onAddWidget: (collage: Boolean) -> Unit,
     onEditWidget: (appWidgetId: Int) -> Unit,
     onBackup: () -> Unit,
@@ -157,6 +158,8 @@ fun MainScreen(
     val gridSize by viewModel.gridSize.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
     val cleaning by viewModel.cleaning.collectAsState()
+    val googlePhotos by viewModel.googlePhotos.collectAsState()
+    var addMenu by remember { mutableStateOf(false) }
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
     var dialog by remember { mutableStateOf<Dialog?>(null) }
@@ -263,12 +266,33 @@ fun MainScreen(
             },
             floatingActionButton = {
                 AnimatedVisibility(visible = tab == Tab.PHOTOS && !selecting, enter = scaleIn(), exit = scaleOut()) {
+                    // De dónde agregar: el selector del teléfono o Google Fotos.
+                    Box {
+                    DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Desde el teléfono") },
+                            leadingIcon = { Icon(painterResource(R.drawable.ic_tab_photos), contentDescription = null) },
+                            onClick = {
+                                addMenu = false
+                                onPickPhotos()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Desde Google Fotos") },
+                            leadingIcon = { Icon(painterResource(R.drawable.ic_cloud), contentDescription = null) },
+                            onClick = {
+                                addMenu = false
+                                onPickGooglePhotos()
+                            },
+                        )
+                    }
                     ExtendedFloatingActionButton(
-                        onClick = onPickPhotos,
+                        onClick = { addMenu = true },
                         expanded = atTop || visible.isEmpty(),
                         icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                         text = { Text(if (currentAlbum != null) "Agregar al álbum" else "Agregar fotos") },
                     )
+                    }
                 }
             },
         ) { padding ->
@@ -283,6 +307,9 @@ fun MainScreen(
                         currentAlbum = currentAlbum,
                         memories = memories,
                         importing = importing,
+                        googlePhotos = googlePhotos,
+                        onReopenGooglePhotos = viewModel::reopenGooglePhotos,
+                        onCancelGooglePhotos = viewModel::cancelGooglePhotos,
                         selection = selection,
                         sortByTaken = sortByTaken,
                         gridSize = gridSize,
@@ -414,6 +441,9 @@ private fun PhotosTab(
     currentAlbum: Album?,
     memories: List<Photo>,
     importing: ImportProgress?,
+    googlePhotos: String?,
+    onReopenGooglePhotos: () -> Unit,
+    onCancelGooglePhotos: () -> Unit,
     selection: Set<String>,
     sortByTaken: Boolean,
     gridSize: Int,
@@ -466,6 +496,11 @@ private fun PhotosTab(
                     onOpen = onOpenAlbum,
                     onNew = onNewAlbum,
                 )
+            }
+        }
+        googlePhotos?.let { status ->
+            item(span = StaggeredGridItemSpan.FullLine) {
+                GooglePhotosStatus(status, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos)
             }
         }
         importing?.let { progress ->
@@ -780,6 +815,29 @@ private fun ImportingRow(progress: ImportProgress) {
             progress = { if (progress.total == 0) 0f else progress.done.toFloat() / progress.total },
             modifier = Modifier.fillMaxWidth().clip(CircleShape),
         )
+    }
+}
+
+/** Mientras el usuario elige fotos en Google Fotos. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GooglePhotosStatus(status: String, onReopen: () -> Unit, onCancel: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(12.dp))
+                Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                TextButton(onClick = onReopen) { Text("Abrir Google Fotos") }
+                TextButton(onClick = onCancel) { Text("Cancelar") }
+            }
+        }
     }
 }
 
