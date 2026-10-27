@@ -112,8 +112,22 @@ class MainActivity : ComponentActivity() {
                         createBackup.launch("fototin-$date.zip")
                     },
                     onRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    onUpdate = ::startUpdate,
                 )
             }
+        }
+    }
+
+    /**
+     * Actualizar: la primera vez Android pide permitir que Fototin instale apps; después descarga
+     * la versión nueva y abre el instalador.
+     */
+    private fun startUpdate() {
+        if (viewModel.canInstallUpdates()) {
+            viewModel.downloadAndInstall()
+        } else {
+            viewModel.showMessage("Permití «Instalar apps desconocidas» para Fototin y volvé a tocar Actualizar")
+            runCatching { startActivity(viewModel.installPermissionIntent()) }
         }
     }
 

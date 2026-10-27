@@ -142,6 +142,7 @@ fun MainScreen(
     onEditWidget: (appWidgetId: Int) -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
+    onUpdate: () -> Unit,
 ) {
     val photos by viewModel.photos.collectAsState()
     val visible by viewModel.visiblePhotos.collectAsState()
@@ -160,6 +161,10 @@ fun MainScreen(
     val dynamicColor by viewModel.dynamicColor.collectAsState()
     val cleaning by viewModel.cleaning.collectAsState()
     val googlePhotos by viewModel.googlePhotos.collectAsState()
+    val update by viewModel.update.collectAsState()
+    val whatsNew by viewModel.whatsNew.collectAsState()
+    val checkingUpdates by viewModel.checkingUpdates.collectAsState()
+    val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
     var addMenu by remember { mutableStateOf(false) }
 
     var tab by rememberSaveable { mutableStateOf(Tab.PHOTOS) }
@@ -316,6 +321,9 @@ fun MainScreen(
                         memories = memories,
                         importing = importing,
                         googlePhotos = googlePhotos,
+                        update = update,
+                        onUpdate = onUpdate,
+                        onDismissUpdate = viewModel::dismissUpdate,
                         onReopenGooglePhotos = viewModel::reopenGooglePhotos,
                         onCancelGooglePhotos = viewModel::cancelGooglePhotos,
                         selection = selection,
@@ -352,6 +360,13 @@ fun MainScreen(
                         onDynamicColor = viewModel::setDynamicColor,
                         cleaning = cleaning,
                         onRemoveDuplicates = viewModel::removeDuplicates,
+                        installedVersion = viewModel.installedVersion,
+                        update = update,
+                        checkingUpdates = checkingUpdates,
+                        autoCheckUpdates = autoCheckUpdates,
+                        onCheckUpdates = { viewModel.checkForUpdates(manual = true) },
+                        onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
+                        onUpdate = onUpdate,
                         onBackup = onBackup,
                         onRestore = onRestore,
                     )
@@ -384,6 +399,20 @@ fun MainScreen(
                 )
             }
         }
+    }
+
+    whatsNew?.let { (version, notes) ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissWhatsNew,
+            title = { Text("Novedades de la versión $version") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (notes.isEmpty()) Text("Mejoras y correcciones.")
+                    notes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                }
+            },
+            confirmButton = { TextButton(onClick = viewModel::dismissWhatsNew) { Text("Genial") } },
+        )
     }
 
     when (val d = dialog) {
@@ -460,6 +489,9 @@ private fun PhotosTab(
     memories: List<Photo>,
     importing: ImportProgress?,
     googlePhotos: String?,
+    update: UpdateState?,
+    onUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit,
     onReopenGooglePhotos: () -> Unit,
     onCancelGooglePhotos: () -> Unit,
     selection: Set<String>,
@@ -514,6 +546,11 @@ private fun PhotosTab(
                     onOpen = onOpenAlbum,
                     onNew = onNewAlbum,
                 )
+            }
+        }
+        update?.let { state ->
+            item(span = StaggeredGridItemSpan.FullLine) {
+                UpdateBanner(state, onUpdate = onUpdate, onDismiss = onDismissUpdate)
             }
         }
         googlePhotos?.let { status ->
@@ -833,6 +870,44 @@ private fun ImportingRow(progress: ImportProgress) {
             progress = { if (progress.total == 0) 0f else progress.done.toFloat() / progress.total },
             modifier = Modifier.fillMaxWidth().clip(CircleShape),
         )
+    }
+}
+
+/** Aviso de versión nueva, con sus novedades y el avance de la descarga. */
+@Composable
+private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "Hay una versión nueva: ${state.release.versionName}",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            state.release.notes.take(3).forEach {
+                Text(
+                    "• $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            when (state) {
+                is UpdateState.Downloading -> {
+                    Text("Descargando… ${(state.progress * 100).toInt()} %", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth().clip(CircleShape))
+                }
+                is UpdateState.Available -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onUpdate) { Text("Actualizar") }
+                    TextButton(onClick = onDismiss) { Text("Ahora no") }
+                }
+            }
+        }
     }
 }
 
