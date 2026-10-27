@@ -190,7 +190,9 @@ fun SettingsTab(
                     "• «Agregar fotos» → «Desde Google Fotos»: se abre Google Fotos, elegís las fotos, " +
                         "tocás «Listo» y volvés a Fototin. La primera vez Google te pide permiso: Fototin solo " +
                         "puede ver las fotos que elijas.\n" +
-                        "• O abrí Google Fotos, elegí una o varias fotos y tocá Compartir → Fototin.",
+                        "• O abrí Google Fotos, elegí una o varias fotos y tocá Compartir → Fototin.\n" +
+                        "• ¿Un álbum entero? Abrilo en Google Fotos, mantené presionada la primera foto y " +
+                        "arrastrá para marcar todas. Al traerlas, tocá «Guardar como álbum» para tenerlo en Fototin.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp),

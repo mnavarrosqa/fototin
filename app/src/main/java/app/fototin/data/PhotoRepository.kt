@@ -31,7 +31,13 @@ class RemovedPhotos internal constructor(internal val entries: List<Pair<Int, Ph
 }
 
 /** Resultado de una importación. */
-data class ImportResult(val ids: List<String>, val duplicates: Int, val failed: Int)
+data class ImportResult(
+    val ids: List<String>,
+    val duplicates: Int,
+    val failed: Int,
+    /** Fotos que ya estaban en la colección y coinciden con alguna de las elegidas. */
+    val existingIds: List<String> = emptyList(),
+)
 
 data class Photo(
     val id: String,
@@ -152,16 +158,23 @@ class PhotoRepository(context: Context) {
             val existing = synchronized(lock) { readIndex() }
             // Dos controles: el archivo idéntico (rápido) y la huella visual, que reconoce la misma
             // foto aunque llegue recomprimida o sin datos EXIF por otro camino.
-            val knownFiles: MutableSet<String> = ConcurrentHashMap.newKeySet<String>().apply {
-                existing.mapNotNullTo(this) { it.hash }
+            // Cada huella apunta a la foto que ya está (o a null si es una que se está importando
+            // ahora), para saber qué fotos de la colección coinciden con las elegidas.
+            val knownFiles = ConcurrentHashMap<String, String>().apply {
+                existing.forEach { e -> e.hash?.let { put(it, e.id) } }
             }
-            val knownImages = existing.mapNotNullTo(mutableListOf()) { it.fingerprint() }
+            val knownImages = existing.mapNotNullTo(mutableListOf<Pair<String?, Fingerprint>>()) { e ->
+                e.fingerprint()?.let { e.id to it }
+            }
+            val alreadyThere = ConcurrentHashMap.newKeySet<String>()
             val isNewImage = { fingerprint: Fingerprint ->
                 synchronized(knownImages) {
-                    if (knownImages.any { ImageHash.sameImage(it, fingerprint) }) {
+                    val match = knownImages.firstOrNull { ImageHash.sameImage(it.second, fingerprint) }
+                    if (match != null) {
+                        match.first?.let(alreadyThere::add)
                         false
                     } else {
-                        knownImages += fingerprint
+                        knownImages += null to fingerprint
                         true
                     }
                 }
@@ -172,7 +185,9 @@ class PhotoRepository(context: Context) {
                         permits.withPermit {
                             runCatching {
                                 val hash = fingerprint(uri)
-                                val entry = if (hash != null && !knownFiles.add(hash)) null else importOne(uri, hash, isNewImage, takenAtByUri[uri])
+                                val sameFile = hash?.let { knownFiles.putIfAbsent(it, NEW_IN_BATCH) }
+                                if (sameFile != null && sameFile != NEW_IN_BATCH) alreadyThere += sameFile
+                                val entry = if (sameFile != null) null else importOne(uri, hash, isNewImage, takenAtByUri[uri])
                                 if (entry == null) duplicates.incrementAndGet()
                                 entry
                             }.also { onProgress(done.incrementAndGet(), uris.size) }
@@ -182,7 +197,7 @@ class PhotoRepository(context: Context) {
             }
             val imported = results.mapNotNull { it.getOrNull() }
             synchronized(lock) { writeIndex(readIndex() + imported) }
-            ImportResult(imported.map { it.id }, duplicates.get(), results.count { it.isFailure })
+            ImportResult(imported.map { it.id }, duplicates.get(), results.count { it.isFailure }, alreadyThere.toList())
         }
 
     /**
@@ -465,6 +480,8 @@ class PhotoRepository(context: Context) {
         private const val MAX_SIDE_PX = 1600
         private const val THUMB_PX = 360
         private const val IMPORT_PARALLELISM = 3
+        /** Marca de una huella de archivo que pertenece a una foto del mismo lote. */
+        private const val NEW_IN_BATCH = ""
         /** Resolución desde la que se calcula la huella visual de fotos ya guardadas. */
         private const val HASH_SOURCE_PX = 128
 

@@ -119,6 +119,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 /** Diálogo abierto en la pantalla principal. */
 private sealed interface Dialog {
     data object NewAlbum : Dialog
+    data class AlbumFromImport(val ids: List<String>) : Dialog
     data class RenameAlbum(val album: Album) : Dialog
     data class DeleteAlbum(val album: Album) : Dialog
     data object AddToAlbum : Dialog
@@ -166,6 +167,13 @@ fun MainScreen(
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+    // Después de traer varias fotos, ofrecer guardarlas como álbum.
+    LaunchedEffect(Unit) {
+        viewModel.albumOffers.collect { offer ->
+            val result = snackbar.showSnackbar(offer.message, actionLabel = "Guardar como álbum", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) dialog = Dialog.AlbumFromImport(offer.ids)
+        }
     }
     // Borrar no pide confirmación: se puede deshacer desde el aviso.
     LaunchedEffect(Unit) {
@@ -387,6 +395,16 @@ fun MainScreen(
             onDismiss = { dialog = null },
             onConfirm = { name ->
                 viewModel.createAlbum(name)
+                dialog = null
+            },
+        )
+        is Dialog.AlbumFromImport -> NameDialog(
+            title = "Nuevo álbum con ${d.ids.size} fotos",
+            initial = "",
+            confirm = "Crear",
+            onDismiss = { dialog = null },
+            onConfirm = { name ->
+                viewModel.createAlbumWith(name, d.ids)
                 dialog = null
             },
         )

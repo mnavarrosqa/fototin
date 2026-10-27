@@ -36,6 +36,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/** Fotos recién traídas que se pueden guardar juntas como álbum. */
+class AlbumOffer(val message: String, val ids: List<String>)
+
 /** Un borrado reciente que todavía se puede deshacer. */
 class UndoDelete(val message: String, val removed: RemovedPhotos)
 
@@ -100,6 +103,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _undo = MutableSharedFlow<UndoDelete>(extraBufferCapacity = 4)
     val undo: SharedFlow<UndoDelete> = _undo.asSharedFlow()
 
+    /** Importaciones recientes que se pueden guardar como álbum. */
+    private val _albumOffers = MutableSharedFlow<AlbumOffer>(extraBufferCapacity = 2)
+    val albumOffers: SharedFlow<AlbumOffer> = _albumOffers.asSharedFlow()
+
     /** Mensajes cortos para mostrar abajo de la pantalla. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -138,7 +145,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, result.ids) }
             _importing.value = null
             refresh()
-            _messages.tryEmit(importMessage(result))
+            announceImport(result, insideAlbum = albumId != null)
         }
     }
 
@@ -197,7 +204,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (albumId != null) withContext(Dispatchers.IO) { albumRepository.add(albumId, result.ids) }
                 refresh()
-                _messages.tryEmit(importMessage(result.copy(failed = result.failed + items.size - downloaded.size)))
+                announceImport(result.copy(failed = result.failed + items.size - downloaded.size), insideAlbum = albumId != null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: GooglePhotosPicker.PickerException) {
@@ -450,6 +457,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             action()
             refresh()
+        }
+    }
+
+    /**
+     * Cuenta cómo salió una importación. Si se eligieron varias fotos fuera de un álbum, ofrece
+     * guardarlas como álbum: incluye las que ya estaban, así el álbum queda completo.
+     */
+    private fun announceImport(result: ImportResult, insideAlbum: Boolean) {
+        val ids = (result.ids + result.existingIds).distinct()
+        if (!insideAlbum && ids.size >= 2) {
+            _albumOffers.tryEmit(AlbumOffer(importMessage(result), ids))
+        } else {
+            _messages.tryEmit(importMessage(result))
+        }
+    }
+
+    /** Crea un álbum con fotos que se acaban de traer y lo abre. */
+    fun createAlbumWith(name: String, ids: List<String>) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val album = withContext(Dispatchers.IO) { albumRepository.create(name, ids) }
+            _currentAlbumId.value = album.id
+            refresh()
+            _messages.tryEmit("Álbum «${album.name}» creado con ${ids.size} fotos")
         }
     }
 
