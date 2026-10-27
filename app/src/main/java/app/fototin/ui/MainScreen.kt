@@ -27,11 +27,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
-import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -113,7 +108,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.animateColorAsState
@@ -164,6 +158,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /** Diálogo abierto en la pantalla principal. */
@@ -263,7 +264,7 @@ fun MainScreen(
         }
     }
 
-    val gridState = rememberLazyStaggeredGridState()
+    val gridState = rememberLazyGridState()
     val atTop by remember { derivedStateOf { gridState.firstVisibleItemIndex == 0 } }
     val scope = rememberCoroutineScope()
     LaunchedEffect(choosingGooglePhotos) {
@@ -675,7 +676,7 @@ private fun TabPill(tab: Tab, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun PhotosTab(
     padding: PaddingValues,
-    gridState: LazyStaggeredGridState,
+    gridState: LazyGridState,
     photos: List<Photo>,
     visible: List<Photo>,
     albums: List<Album>,
@@ -830,19 +831,19 @@ private fun PhotosTab(
 
     Box(Modifier.fillMaxSize()) {
         // Las fotos van de borde a borde, con separaciones finas; los títulos y tarjetas llevan margen.
-        LazyVerticalStaggeredGrid(
+        LazyVerticalGrid(
             state = gridState,
-            columns = StaggeredGridCells.Adaptive(GRID_SIZES[gridSize.coerceIn(GRID_SIZES.indices)]),
+            columns = GridCells.Adaptive(GRID_SIZES[gridSize.coerceIn(GRID_SIZES.indices)]),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
                 bottom = padding.calculateBottomPadding() + 16.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(GRID_GAP),
-            verticalItemSpacing = GRID_GAP,
+            verticalArrangement = Arrangement.spacedBy(GRID_GAP),
             modifier = Modifier.fillMaxSize().then(gestures),
         ) {
             if (!selecting) {
-                item(span = StaggeredGridItemSpan.FullLine) {
+                item(span = FULL_LINE) {
                     LargeHeader(
                         title = title,
                         subtitle = if (query.isNotBlank()) resultCount(visible.size) else headerSubtitle(visible, sortByTaken),
@@ -859,19 +860,19 @@ private fun PhotosTab(
                     )
                 }
                 if (searching) {
-                    item(key = "search", span = StaggeredGridItemSpan.FullLine) {
+                    item(key = "search", span = FULL_LINE) {
                         SearchField(query, onQuery = onQuery, onClose = onCloseSearch, modifier = side.padding(bottom = 8.dp))
                     }
                 }
                 if (memories.isNotEmpty() && currentAlbum == null && !favoritesOnly && !searching) {
-                    item(span = StaggeredGridItemSpan.FullLine) {
+                    item(span = FULL_LINE) {
                         // Tocar los recuerdos de hoy los pasa como presentación.
                         MemoriesHero(memories, onPlay = { onSlideshow(memories, WidgetSource.Memories) }, modifier = side)
                     }
                 }
             }
             if (photos.isNotEmpty() && !searching) {
-                item(span = StaggeredGridItemSpan.FullLine) {
+                item(span = FULL_LINE) {
                     Collections(
                         photos = photos,
                         albums = albums,
@@ -884,12 +885,12 @@ private fun PhotosTab(
                 }
             }
             update?.let { state ->
-                item(span = StaggeredGridItemSpan.FullLine) {
+                item(span = FULL_LINE) {
                     UpdateBanner(state, onUpdate = onUpdate, onDismiss = onDismissUpdate, modifier = side)
                 }
             }
             googlePhotos?.let { status ->
-                item(span = StaggeredGridItemSpan.FullLine) {
+                item(span = FULL_LINE) {
                     GooglePhotosStatus(
                         status,
                         onCheck = onCheckGooglePhotos,
@@ -901,10 +902,10 @@ private fun PhotosTab(
                 }
             }
             importing?.let { progress ->
-                item(span = StaggeredGridItemSpan.FullLine) { ImportingRow(progress, modifier = side) }
+                item(span = FULL_LINE) { ImportingRow(progress, modifier = side) }
             }
             if (visible.isEmpty() && importing == null) {
-                item(span = StaggeredGridItemSpan.FullLine) {
+                item(span = FULL_LINE) {
                     when {
                         query.isNotBlank() -> EmptyCollection(
                             "No hay fotos que coincidan con «${query.trim()}». Probá con una palabra de una nota, " +
@@ -923,12 +924,12 @@ private fun PhotosTab(
                 }
             }
             if (visible.isNotEmpty() && !selecting) {
-                item(span = StaggeredGridItemSpan.FullLine) { Spacer(Modifier.height(8.dp)) }
+                item(span = FULL_LINE) { Spacer(Modifier.height(8.dp)) }
             }
             // Ordenadas por fecha de la foto, con un separador por año.
             groups.forEach { (year, group) ->
                 if (year != null) {
-                    item(key = "year-$year", span = StaggeredGridItemSpan.FullLine) {
+                    item(key = "year-$year", span = FULL_LINE) {
                         Row(side.padding(top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
                             Text(year.toString(), style = MaterialTheme.typography.titleLarge)
                             Spacer(Modifier.width(8.dp))
@@ -981,6 +982,9 @@ private fun PhotosTab(
 
 /** Separación entre fotos de la grilla. */
 private val GRID_GAP = 2.dp
+
+/** Títulos y tarjetas ocupan todo el ancho de la grilla. */
+private val FULL_LINE: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
 
 /** Con menos fotos que estas no hace falta la barra para saltar de fecha. */
 private const val SCRUBBER_MIN_PHOTOS = 40
@@ -1035,7 +1039,7 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onClose: () ->
  */
 @Composable
 private fun DateScrubber(
-    gridState: LazyStaggeredGridState,
+    gridState: LazyGridState,
     visible: List<Photo>,
     gridIndexOf: (Int) -> Int,
     modifier: Modifier = Modifier,

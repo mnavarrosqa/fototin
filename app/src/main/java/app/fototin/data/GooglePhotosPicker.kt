@@ -116,7 +116,8 @@ class GooglePhotosPicker(private val token: String) {
         val polling = json.optJSONObject("pollingConfig")
         return Session(
             id = json.getString("id"),
-            pickerUri = json.getString("pickerUri"),
+            // Google deja de mandar el enlace una vez que el usuario terminó de elegir.
+            pickerUri = json.optString("pickerUri"),
             ready = json.optBoolean("mediaItemsSet"),
             pollIntervalMs = durationMs(polling?.optString("pollInterval"), default = 3_000).coerceIn(1_000, 10_000),
             timeoutMs = durationMs(polling?.optString("timeoutIn"), default = 30 * 60_000),

@@ -295,7 +295,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     picker.getSession(resume.sessionId)
                 }
                 sessionId = session.id
-                pickerUri = session.pickerUri
+                pickerUri = session.pickerUri.ifEmpty { resume?.pickerUri.orEmpty() }.takeIf { it.isNotEmpty() }
                 // Lo que pasó antes de abrir Google Fotos (como volver de la pantalla de permiso) no cuenta.
                 pickerPokes.tryReceive()
                 manualPickerCheck = false
