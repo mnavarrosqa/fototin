@@ -48,17 +48,21 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::restore) }
 
+    /** Qué hacer con el permiso de Google cuando llegue (empezar o retomar una elección). */
+    private var onGoogleToken: ((String) -> Unit)? = null
+
     // Si Google necesita mostrar la pantalla de permiso, vuelve por acá con el resultado.
     private val googleAuth = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data) }
-            .onSuccess { auth -> auth.accessToken?.let(viewModel::pickFromGooglePhotos) }
+            .onSuccess { auth -> auth.accessToken?.let { token -> onGoogleToken?.invoke(token) } }
             .onFailure { viewModel.showMessage("No se pudo conectar con Google Fotos") }
     }
 
-    /** Pide permiso para leer las fotos que el usuario elija en Google Fotos y arranca la elección. */
-    private fun pickFromGooglePhotos() {
+    /** Pide permiso para leer las fotos que el usuario elija en Google Fotos. */
+    private fun authorizeGoogle(onToken: (String) -> Unit) {
+        onGoogleToken = onToken
         val request = AuthorizationRequest.builder()
             .setRequestedScopes(listOf(Scope(GooglePhotosPicker.SCOPE)))
             .build()
@@ -68,7 +72,7 @@ class MainActivity : ComponentActivity() {
                 if (result.hasResolution() && pending != null) {
                     googleAuth.launch(IntentSenderRequest.Builder(pending.intentSender).build())
                 } else {
-                    result.accessToken?.let(viewModel::pickFromGooglePhotos)
+                    result.accessToken?.let(onToken)
                 }
             }
             .addOnFailureListener { e ->
@@ -76,11 +80,17 @@ class MainActivity : ComponentActivity() {
             }
     }
 
+    private fun pickFromGooglePhotos() = authorizeGoogle(viewModel::pickFromGooglePhotos)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RotationScheduler.schedule(this)
         if (savedInstanceState == null) handleShare(intent)
+        lifecycleScope.launch {
+            // Una elección de Google Fotos quedó pendiente (Android cerró la app): retomarla.
+            viewModel.needsGoogleAuth.collect { authorizeGoogle(viewModel::resumeGooglePhotos) }
+        }
         lifecycleScope.launch {
             viewModel.openUrl.collect { url ->
                 // Si está instalada, el enlace abre la app de Google Fotos; si no, el navegador.
@@ -135,6 +145,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Al volver (por ejemplo, después de agregar o editar un widget), mostrar los widgets al día.
         viewModel.refreshWidgets()
+        // Al volver de Google Fotos, ver enseguida si ya se eligieron las fotos.
+        viewModel.onAppResumed()
     }
 
     override fun onNewIntent(intent: Intent) {
