@@ -19,6 +19,12 @@ enum class WidgetStyle(val label: String, val alwaysText: Boolean = false) {
     PETAL("Pétalo"),
     STAMP("Estampilla"),
     FRAME("Marco"),
+    GLASS("Vidrio", alwaysText = true),
+    COVER("Portada"),
+    SLIDE("Diapositiva"),
+    MONO("Blanco y negro"),
+    BLOB("Orgánica"),
+    FLOWER("Flor"),
     FULL("Borde a borde");
 
     companion object {
@@ -43,7 +49,12 @@ enum class CollageStyle(val label: String, val counts: IntRange) {
     MAGAZINE("Revista", 3..5),
     POLAROIDS("Polaroids", 2..5),
     PHOTOBOOTH("Fotomatón", 3..4),
-    FILM("Película", 3..5);
+    FILM("Película", 3..5),
+    STACK("Pila", 2..5),
+    DIAGONAL("Diagonal", 2..4),
+    ARCHES("Arcos", 2..4),
+    BUBBLES("Burbujas", 2..5),
+    SCRAPBOOK("Recortes", 2..4);
 
     fun clampCount(count: Int): Int = count.coerceIn(counts)
 

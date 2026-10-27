@@ -42,6 +42,11 @@ object CollageStyler {
             CollageStyle.POLAROIDS -> drawPolaroids(canvas, sources, bounds, dp, captions, seed)
             CollageStyle.PHOTOBOOTH -> drawPhotobooth(canvas, sources, bounds, dp)
             CollageStyle.FILM -> drawFilm(canvas, sources, bounds, dp)
+            CollageStyle.STACK -> drawStack(canvas, sources, bounds, dp, seed)
+            CollageStyle.DIAGONAL -> drawDiagonal(canvas, sources, bounds, cornerDp * dp, dp)
+            CollageStyle.ARCHES -> drawArches(canvas, sources, bounds, dp)
+            CollageStyle.BUBBLES -> drawBubbles(canvas, sources, bounds, dp)
+            CollageStyle.SCRAPBOOK -> drawScrapbook(canvas, sources, bounds, dp, seed)
         }
         return out
     }
@@ -262,10 +267,125 @@ object CollageStyler {
         }
     }
 
-    private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
-        if (paint.measureText(text) <= maxWidth) return text
-        var end = text.length
-        while (end > 1 && paint.measureText(text, 0, end) + paint.measureText("…") > maxWidth) end--
-        return text.substring(0, end) + "…"
+    private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String = PhotoStyler.ellipsize(text, paint, maxWidth)
+
+    // ---- Pila: fotos apiladas, la primera arriba de todo ----
+
+    private fun drawStack(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float, seed: Int) {
+        val card = RectF(bounds).apply { inset(width() * 0.13f, height() * 0.13f) }
+        val border = max(4 * dp, min(card.width(), card.height()) * 0.04f)
+        val angles = floatArrayOf(0f, -7f, 6f, -11f, 10f)
+        val shift = min(card.width(), card.height()) * 0.05f
+        // De atrás para adelante.
+        for (i in sources.indices.reversed()) {
+            val angle = if (i == 0) (seed.mod(5) - 2) * 0.6f else angles[i % angles.size]
+            val dx = if (i == 0) 0f else (if (i % 2 == 0) shift else -shift)
+            canvas.save()
+            canvas.translate(dx, 0f)
+            canvas.rotate(angle, card.centerX(), card.centerY())
+            canvas.drawRoundRect(card, 6 * dp, 6 * dp, PhotoStyler.shadowPaint(Color.WHITE, dp))
+            val photo = PhotoStyler.inset(card, border)
+            PhotoStyler.drawPhoto(canvas, sources[i], photo, PhotoStyler.roundRect(photo, 3 * dp))
+            canvas.restore()
+        }
+    }
+
+    // ---- Diagonal: franjas con cortes inclinados ----
+
+    private fun drawDiagonal(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, outer: Float, dp: Float) {
+        val n = sources.size
+        val horizontal = bounds.width() >= bounds.height()
+        val long = if (horizontal) bounds.width() else bounds.height()
+        val short = if (horizontal) bounds.height() else bounds.width()
+        val slant = min(long / n * 0.45f, short * 0.3f)
+        val gap = 4 * dp
+        canvas.save()
+        canvas.clipPath(PhotoStyler.roundRect(bounds, outer))
+        sources.forEachIndexed { i, source ->
+            // Cada franja va de un corte al siguiente; el corte se corre [slant] de un borde al otro.
+            val start = if (i == 0) -slant else long * i / n + gap / 2f
+            val end = if (i == n - 1) long + slant else long * (i + 1) / n - gap / 2f
+            fun point(along: Float, across: Float) =
+                if (horizontal) bounds.left + along to bounds.top + across else bounds.left + across to bounds.top + along
+            val corners = listOf(
+                point(start + slant / 2f, 0f), point(end + slant / 2f, 0f),
+                point(end - slant / 2f, short), point(start - slant / 2f, short),
+            )
+            val path = android.graphics.Path().apply {
+                corners.forEachIndexed { k, (x, y) -> if (k == 0) moveTo(x, y) else lineTo(x, y) }
+                close()
+            }
+            val box = RectF(
+                corners.minOf { it.first }.coerceAtLeast(bounds.left), corners.minOf { it.second }.coerceAtLeast(bounds.top),
+                corners.maxOf { it.first }.coerceAtMost(bounds.right), corners.maxOf { it.second }.coerceAtMost(bounds.bottom),
+            )
+            PhotoStyler.drawPhoto(canvas, source, box, path)
+        }
+        canvas.restore()
+    }
+
+    // ---- Arcos: ventanas con la parte de arriba redonda ----
+
+    private fun drawArches(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float) {
+        val n = sources.size
+        val area = PhotoStyler.inset(bounds, 4 * dp)
+        val gap = 8 * dp
+        // En widgets altos, dos columnas; si no, todos en fila.
+        val columns = if (area.width() >= area.height() * 0.8f) n else min(n, 2)
+        val rows = (n + columns - 1) / columns
+        val cells = strip(area, rows, gap, horizontal = false).flatMapIndexed { r, row ->
+            val inRow = if (r == rows - 1) n - columns * (rows - 1) else columns
+            strip(row, inRow, gap, horizontal = true)
+        }
+        cells.zip(sources).forEach { (cell, source) ->
+            val top = min(cell.width(), cell.height()) / 2f
+            PhotoStyler.drawPhoto(canvas, source, cell, PhotoStyler.roundRect(cell, top, top, 6 * dp, 6 * dp), shadow = dp)
+        }
+    }
+
+    // ---- Burbujas: círculos de distintos tamaños ----
+
+    /** Centro y radio de cada burbuja en un cuadrado de 1 × 1. */
+    private val BUBBLES = mapOf(
+        2 to listOf(Triple(0.32f, 0.36f, 0.3f), Triple(0.68f, 0.66f, 0.3f)),
+        3 to listOf(Triple(0.3f, 0.32f, 0.27f), Triple(0.73f, 0.36f, 0.23f), Triple(0.5f, 0.75f, 0.24f)),
+        4 to listOf(Triple(0.28f, 0.29f, 0.24f), Triple(0.73f, 0.28f, 0.22f), Triple(0.29f, 0.74f, 0.22f), Triple(0.72f, 0.71f, 0.25f)),
+        5 to listOf(
+            Triple(0.5f, 0.5f, 0.24f), Triple(0.19f, 0.21f, 0.17f), Triple(0.81f, 0.21f, 0.17f),
+            Triple(0.19f, 0.79f, 0.17f), Triple(0.81f, 0.79f, 0.17f),
+        ),
+    )
+
+    private fun drawBubbles(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float) {
+        val layout = BUBBLES[sources.size.coerceIn(2, 5)] ?: return
+        val area = PhotoStyler.inset(bounds, 4 * dp)
+        val unit = min(area.width(), area.height())
+        layout.zip(sources).forEach { (spot, source) ->
+            val (fx, fy, fr) = spot
+            val cx = area.left + area.width() * fx
+            val cy = area.top + area.height() * fy
+            val r = unit * fr
+            canvas.drawCircle(cx, cy, r, PhotoStyler.shadowPaint(Color.WHITE, dp))
+            val inner = r - max(2.5f * dp, r * 0.05f)
+            val photo = RectF(cx - inner, cy - inner, cx + inner, cy + inner)
+            PhotoStyler.drawPhoto(canvas, source, photo, PhotoStyler.roundRect(photo, inner))
+        }
+    }
+
+    // ---- Recortes: fotos con borde blanco, algo torcidas y pegadas con cinta ----
+
+    private fun drawScrapbook(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float, seed: Int) {
+        val area = PhotoStyler.inset(bounds, 10 * dp)
+        val cells = mosaicCells(area, sources.size, 14 * dp)
+        cells.zip(sources).forEachIndexed { i, (cell, source) ->
+            val angle = ANGLES[(i + seed.mod(ANGLES.size)) % ANGLES.size] * 0.45f
+            canvas.save()
+            canvas.rotate(angle, cell.centerX(), cell.centerY())
+            canvas.drawRect(cell, PhotoStyler.shadowPaint(Color.WHITE, dp))
+            val photo = PhotoStyler.inset(cell, max(3 * dp, min(cell.width(), cell.height()) * 0.05f))
+            PhotoStyler.drawPhoto(canvas, source, photo, PhotoStyler.roundRect(photo, 0f))
+            if (i % 2 == 0) PhotoStyler.drawTape(canvas, cell, dp)
+            canvas.restore()
+        }
     }
 }

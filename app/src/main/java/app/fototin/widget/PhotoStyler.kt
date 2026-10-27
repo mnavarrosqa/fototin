@@ -117,6 +117,39 @@ object PhotoStyler {
             WidgetStyle.CALENDAR -> drawCalendar(canvas, source, bounds, dp, cornerDp * dp, caption)
 
             WidgetStyle.POSTCARD -> drawPostcard(canvas, source, bounds, dp, caption)
+
+            WidgetStyle.GLASS -> drawGlass(canvas, source, bounds, dp, cornerDp * dp, caption)
+
+            WidgetStyle.COVER -> drawCover(canvas, source, bounds, dp, cornerDp * dp, caption)
+
+            WidgetStyle.SLIDE -> drawSlide(canvas, source, bounds, dp, caption)
+
+            WidgetStyle.MONO -> {
+                val shape = roundRect(bounds, cornerDp * dp)
+                drawPhoto(canvas, source, bounds, shape, filter = MONO_FILTER)
+                drawVignette(canvas, bounds, shape)
+                caption?.let { drawPill(canvas, it, bounds, dp, centered = false) }
+            }
+
+            WidgetStyle.BLOB -> {
+                val area = centeredArea(inset(bounds, 8 * dp), maxAspect = 1.25f).let { a ->
+                    // Tampoco más alta que 1,25 veces su ancho.
+                    val h = min(a.height(), a.width() * 1.25f)
+                    RectF(a.left, a.centerY() - h / 2f, a.right, a.centerY() + h / 2f)
+                }
+                val shape = polar(area) { t -> 1f + 0.055f * kotlin.math.sin(3 * t + 0.6f) + 0.035f * kotlin.math.cos(5 * t) }
+                drawPhoto(canvas, source, area, shape, shadow = dp)
+                caption?.let { drawPill(canvas, it, area, dp, centered = true) }
+            }
+
+            WidgetStyle.FLOWER -> {
+                val side = min(bounds.width(), bounds.height()) - 10 * dp
+                val area = RectF(bounds.centerX() - side / 2f, bounds.centerY() - side / 2f, bounds.centerX() + side / 2f, bounds.centerY() + side / 2f)
+                // Borde ondulado, como las formas de Material You.
+                val shape = polar(area) { t -> 0.93f + 0.07f * kotlin.math.cos(8 * t) }
+                drawPhoto(canvas, source, area, shape, shadow = dp)
+                caption?.let { drawPill(canvas, it, inset(area, side * 0.08f), dp, centered = true) }
+            }
         }
         return out
     }
@@ -172,7 +205,7 @@ object PhotoStyler {
     }
 
     /** Cinta washi translúcida pegada arriba de la foto. */
-    private fun drawTape(canvas: Canvas, card: RectF, dp: Float) {
+    internal fun drawTape(canvas: Canvas, card: RectF, dp: Float) {
         val width = card.width() * 0.38f
         val height = max(14 * dp, card.height() * 0.09f)
         val tape = RectF(card.centerX() - width / 2f, card.top - height / 2f, card.centerX() + width / 2f, card.top + height / 2f)
@@ -379,6 +412,162 @@ object PhotoStyler {
         }
     }
 
+    /**
+     * Tarjeta de vidrio esmerilado sobre la foto, con la nota o la fecha, como los widgets
+     * actuales de iOS y Android.
+     */
+    private fun drawGlass(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, corner: Float, caption: String?) {
+        drawPhoto(canvas, source, bounds, roundRect(bounds, corner))
+        val margin = max(8 * dp, min(bounds.width(), bounds.height()) * 0.05f)
+        val panelHeight = max(44 * dp, bounds.height() * 0.24f).coerceAtMost(bounds.height() - margin * 2)
+        val panel = RectF(bounds.left + margin, bounds.bottom - margin - panelHeight, bounds.right - margin, bounds.bottom - margin)
+        val panelCorner = max(corner - margin, 12 * dp)
+        val panelShape = roundRect(panel, panelCorner)
+        // La misma foto, desenfocada, dibujada solo dentro de la tarjeta: queda alineada con la de atrás.
+        val blurred = blurredCopy(source.bitmap)
+        drawPhoto(canvas, StyledSource(blurred, source.focusX, source.focusY), bounds, panelShape)
+        blurred.recycle()
+        canvas.drawPath(panelShape, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x40FFFFFF })
+        canvas.drawPath(panelShape, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, dp)
+            color = 0x66FFFFFF
+        })
+        val title = caption ?: SimpleDateFormat("EEEE d", Locale.getDefault()).format(Date())
+        val paint = textPaint(Color.WHITE, Typeface.create("sans-serif-medium", Typeface.NORMAL)).apply {
+            textSize = min(panel.height() * 0.36f, 17 * dp)
+            setShadowLayer(3 * dp, 0f, 0.5f * dp, 0x55000000)
+        }
+        val pad = panel.height() * 0.32f
+        val baseline = panel.centerY() - (paint.ascent() + paint.descent()) / 2f
+        canvas.drawText(ellipsize(title, paint, panel.width() - pad * 2), panel.left + pad, baseline, paint)
+    }
+
+    /** Tapa de revista: el mes en grande arriba y la nota abajo, en letra de imprenta. */
+    private fun drawCover(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, corner: Float, caption: String?) {
+        val shape = roundRect(bounds, corner)
+        drawPhoto(canvas, source, bounds, shape)
+        canvas.drawPath(shape, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, bounds.top, 0f, bounds.bottom,
+                intArrayOf(0x8C000000.toInt(), 0x00000000, 0x00000000, 0x80000000.toInt()),
+                floatArrayOf(0f, 0.35f, 0.62f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        })
+        val margin = max(12 * dp, min(bounds.width(), bounds.height()) * 0.07f)
+        val today = Date()
+        val masthead = SimpleDateFormat("MMMM", Locale.getDefault()).format(today).uppercase()
+        val title = textPaint(Color.WHITE, Typeface.create(Typeface.SERIF, Typeface.BOLD)).apply {
+            letterSpacing = 0.04f
+            textSize = 100f
+            // Que el título ocupe el ancho, como en las revistas.
+            textSize = min(100f * (bounds.width() - margin * 2) / measureText(masthead), bounds.height() * 0.2f)
+        }
+        val titleBaseline = bounds.top + margin - title.ascent() * 0.92f
+        canvas.drawText(masthead, bounds.left + margin, titleBaseline, title)
+        val issue = textPaint(0xDDFFFFFF.toInt(), Typeface.create("sans-serif-medium", Typeface.NORMAL)).apply {
+            letterSpacing = 0.12f
+            textSize = max(8 * dp, title.textSize * 0.16f)
+        }
+        val edition = "EDICIÓN " + SimpleDateFormat("d · yyyy", Locale.getDefault()).format(today)
+        canvas.drawText(edition, bounds.left + margin, titleBaseline + issue.textSize * 1.6f, issue)
+        if (caption != null) {
+            val text = textPaint(Color.WHITE, Typeface.create(Typeface.SERIF, Typeface.ITALIC)).apply {
+                textSize = min(18 * dp, bounds.height() * 0.09f)
+            }
+            canvas.drawText(ellipsize(caption, text, bounds.width() - margin * 2), bounds.left + margin, bounds.bottom - margin, text)
+        }
+    }
+
+    /** Diapositiva de 35 mm: marco de cartón con la foto en la ventana. */
+    private fun drawSlide(canvas: Canvas, source: StyledSource, bounds: RectF, dp: Float, caption: String?) {
+        val side = min(bounds.width(), bounds.height()) - 10 * dp
+        val mount = RectF(bounds.centerX() - side / 2f, bounds.centerY() - side / 2f, bounds.centerX() + side / 2f, bounds.centerY() + side / 2f)
+        canvas.drawRoundRect(mount, side * 0.06f, side * 0.06f, shadowPaint(Color.rgb(0xF4, 0xF1, 0xEA), dp))
+        val border = side * 0.17f
+        val window = RectF(mount.left + border, mount.top + border, mount.right - border, mount.bottom - border * 1.05f)
+        drawPhoto(canvas, source, window, roundRect(window, side * 0.025f))
+        // Bisel del cartón alrededor de la ventana.
+        canvas.drawPath(roundRect(window, side * 0.025f), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, dp)
+            color = 0x33000000
+        })
+        val label = textPaint(Color.rgb(0x6F, 0x67, 0x5E), Typeface.MONOSPACE).apply {
+            textAlign = Paint.Align.CENTER
+            textSize = min(border * 0.32f, 11 * dp)
+            letterSpacing = 0.08f
+        }
+        val top = (mount.top + window.top) / 2f - (label.ascent() + label.descent()) / 2f
+        canvas.drawText("FOTOTIN · 35", mount.centerX(), top, label)
+        caption?.let {
+            val bottom = (window.bottom + mount.bottom) / 2f - (label.ascent() + label.descent()) / 2f
+            canvas.drawText(ellipsize(it, label, window.width()), mount.centerX(), bottom, label)
+        }
+    }
+
+    /** Oscurece apenas los bordes, como las fotos analógicas. */
+    private fun drawVignette(canvas: Canvas, bounds: RectF, shape: Path) {
+        canvas.drawPath(shape, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                bounds.centerX(), bounds.centerY(), max(bounds.width(), bounds.height()) * 0.75f,
+                intArrayOf(0x00000000, 0x00000000, 0x59000000),
+                floatArrayOf(0f, 0.55f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        })
+    }
+
+    /** Blanco y negro con un poco más de contraste. */
+    private val MONO_FILTER = android.graphics.ColorMatrixColorFilter(
+        android.graphics.ColorMatrix().apply {
+            setSaturation(0f)
+            val contrast = 1.12f
+            val shift = 128f * (1f - contrast)
+            postConcat(android.graphics.ColorMatrix(floatArrayOf(
+                contrast, 0f, 0f, 0f, shift,
+                0f, contrast, 0f, 0f, shift,
+                0f, 0f, contrast, 0f, shift,
+                0f, 0f, 0f, 1f, 0f,
+            )))
+        },
+    )
+
+    /** Forma redondeada irregular: el radio de cada ángulo lo da [radius] (1 = el borde de [area]). */
+    private fun polar(area: RectF, radius: (Float) -> Float): Path {
+        val steps = 120
+        val rx = area.width() / 2f
+        val ry = area.height() / 2f
+        // Se achica para que los picos no se salgan del área.
+        val peak = (0 until steps).maxOf { radius(it * 2f * Math.PI.toFloat() / steps) }
+        return Path().apply {
+            for (i in 0..steps) {
+                val t = i * 2f * Math.PI.toFloat() / steps
+                val f = radius(t) / peak
+                val x = area.centerX() + rx * f * kotlin.math.cos(t)
+                val y = area.centerY() + ry * f * kotlin.math.sin(t)
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+    }
+
+    /** Copia muy desenfocada (achicar y volver a agrandar con filtrado). */
+    internal fun blurredCopy(src: Bitmap): Bitmap {
+        val tiny = Bitmap.createScaledBitmap(src, 24, (24f * src.height / src.width).toInt().coerceAtLeast(1), true)
+        val blurred = Bitmap.createScaledBitmap(tiny, 96, (96f * src.height / src.width).toInt().coerceAtLeast(1), true)
+        if (tiny !== src && tiny !== blurred) tiny.recycle()
+        return blurred
+    }
+
+    internal fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
+        if (paint.measureText(text) <= maxWidth) return text
+        var end = text.length
+        while (end > 1 && paint.measureText(text, 0, end) + paint.measureText("…") > maxWidth) end--
+        return text.substring(0, end) + "…"
+    }
+
     internal fun inset(rect: RectF, by: Float) = RectF(rect).apply { inset(by, by) }
 
     /** Área centrada dentro de [bounds] que no es más ancha que [maxAspect] veces su alto. */
@@ -414,7 +603,14 @@ object PhotoStyler {
      * Dibuja la foto recortada para cubrir [dst], con la forma de [shape], centrando el recorte en
      * el punto de foco de la foto sin dejar huecos.
      */
-    internal fun drawPhoto(canvas: Canvas, source: StyledSource, dst: RectF, shape: Path, shadow: Float = 0f) {
+    internal fun drawPhoto(
+        canvas: Canvas,
+        source: StyledSource,
+        dst: RectF,
+        shape: Path,
+        shadow: Float = 0f,
+        filter: android.graphics.ColorFilter? = null,
+    ) {
         if (shadow > 0f) canvas.drawPath(shape, shadowPaint(Color.WHITE, shadow))
         val src = source.bitmap
         val scale = max(dst.width() / src.width, dst.height() / src.height)
@@ -431,6 +627,7 @@ object PhotoStyler {
             shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
                 setLocalMatrix(matrix)
             }
+            colorFilter = filter
         }
         canvas.drawPath(shape, paint)
     }
