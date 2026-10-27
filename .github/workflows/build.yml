@@ -8,12 +8,20 @@ on:
 permissions:
   contents: write
 
+# Dos merges seguidos a main no publican releases en paralelo.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+        with:
+          # Historial y etiquetas completos para armar las novedades desde la versión anterior.
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -44,6 +52,23 @@ jobs:
         with:
           name: fototin-apk
           path: fototin.apk
+      # Novedades: el título de cada PR que entró desde la versión anterior. La app las muestra
+      # en el aviso de actualización y después de actualizar.
+      - name: Write release notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+          RANGE="${PREV:+$PREV..}HEAD"
+          git log --merges --first-parent --format='%b' "$RANGE" | sed '/^[[:space:]]*$/d' | sed 's/^/- /' > changes.md
+          [ -s changes.md ] || echo "- Mejoras y correcciones" > changes.md
+          {
+            echo "## Novedades"
+            echo
+            cat changes.md
+            echo
+            echo "Para instalar o actualizar, abrí \`fototin.apk\` desde el teléfono, o tocá **Actualizar** dentro de Fototin."
+          } > release-notes.md
+          cat release-notes.md
       # Cada push a main publica una release; el link .../releases/latest/download/fototin.apk
       # siempre apunta a la última versión.
       - name: Publish release
@@ -52,7 +77,8 @@ jobs:
         with:
           tag_name: v0.2.${{ github.run_number }}
           name: Fototin 0.2.${{ github.run_number }}
+          # La etiqueta va en el commit que se compiló (si no, va a la rama por defecto del repo).
+          target_commitish: ${{ github.sha }}
           make_latest: true
           files: fototin.apk
-          body: |
-            Descargá `fototin.apk` desde el teléfono y abrilo para instalar o actualizar.
+          body_path: release-notes.md

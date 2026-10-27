@@ -55,6 +55,13 @@ fun SettingsTab(
     onDynamicColor: (Boolean) -> Unit,
     cleaning: Boolean,
     onRemoveDuplicates: () -> Unit,
+    installedVersion: String,
+    update: UpdateState?,
+    checkingUpdates: Boolean,
+    autoCheckUpdates: Boolean,
+    onCheckUpdates: () -> Unit,
+    onAutoCheckUpdates: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -158,6 +165,47 @@ fun SettingsTab(
                 ) {
                     FilledTonalButton(onClick = onBackup, enabled = !backupBusy && photoCount > 0) { Text("Guardar copia") }
                     OutlinedButton(onClick = onRestore, enabled = !backupBusy) { Text("Restaurar") }
+                }
+            }
+        }
+        item {
+            SettingsCard("Actualizaciones") {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(
+                        when (update) {
+                            null -> "Tenés la versión $installedVersion."
+                            is UpdateState.Downloading -> "Descargando la versión ${update.release.versionName}…"
+                            is UpdateState.Available -> "Tenés la $installedVersion y ya está la ${update.release.versionName}."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (checkingUpdates) {
+                        CircularProgressIndicator(Modifier.padding(start = 12.dp).size(24.dp), strokeWidth = 3.dp)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                ) {
+                    if (update is UpdateState.Available) {
+                        FilledTonalButton(onClick = onUpdate) { Text("Actualizar") }
+                    } else {
+                        OutlinedButton(onClick = onCheckUpdates, enabled = !checkingUpdates) { Text("Buscar actualizaciones") }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 12.dp, horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Buscar al abrir la app", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Como mucho cada 6 horas. Las actualizaciones se instalan encima sin perder nada.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = autoCheckUpdates, onCheckedChange = onAutoCheckUpdates)
                 }
             }
         }

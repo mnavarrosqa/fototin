@@ -14,6 +14,8 @@ import app.fototin.data.PhotoPool
 import app.fototin.data.PhotoRepository
 import app.fototin.data.RemovedPhotos
 import app.fototin.data.Settings
+import app.fototin.update.Release
+import app.fototin.update.Updater
 import app.fototin.widget.PlacedWidget
 import app.fototin.widget.RotationScheduler
 import app.fototin.widget.WidgetSupport
@@ -35,6 +37,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/** Una versión nueva: disponible para instalar o descargándose. */
+sealed interface UpdateState {
+    val release: Release
+
+    data class Available(override val release: Release) : UpdateState
+    data class Downloading(override val release: Release, val progress: Float) : UpdateState
+}
+
+private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
 /** Fotos recién traídas que se pueden guardar juntas como álbum. */
 class AlbumOffer(val message: String, val ids: List<String>)
@@ -103,6 +115,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _undo = MutableSharedFlow<UndoDelete>(extraBufferCapacity = 4)
     val undo: SharedFlow<UndoDelete> = _undo.asSharedFlow()
 
+    private val updater = Updater(app)
+
+    /** Estado de la actualización: null si no hay versión nueva (o se descartó el aviso). */
+    private val _update = MutableStateFlow<UpdateState?>(null)
+    val update: StateFlow<UpdateState?> = _update.asStateFlow()
+
+    private val _checkingUpdates = MutableStateFlow(false)
+    val checkingUpdates: StateFlow<Boolean> = _checkingUpdates.asStateFlow()
+
+    private val _autoCheckUpdates = MutableStateFlow(settings.autoCheckUpdates)
+    val autoCheckUpdates: StateFlow<Boolean> = _autoCheckUpdates.asStateFlow()
+
+    val installedVersion: String = runCatching { updater.installedVersionName }.getOrDefault("")
+
+    /** Novedades de la versión recién instalada (nombre y renglones), para mostrarlas una vez. */
+    private val _whatsNew = MutableStateFlow(runCatching { settings.takeReleaseNotes(updater.installedVersionCode) }.getOrNull())
+    val whatsNew: StateFlow<Pair<String, List<String>>?> = _whatsNew.asStateFlow()
+
     /** Importaciones recientes que se pueden guardar como álbum. */
     private val _albumOffers = MutableSharedFlow<AlbumOffer>(extraBufferCapacity = 2)
     val albumOffers: SharedFlow<AlbumOffer> = _albumOffers.asSharedFlow()
@@ -128,6 +158,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val shuffle: StateFlow<Boolean> = _shuffle.asStateFlow()
 
     init {
+        // Buscar versión nueva al abrir, como mucho cada 6 horas.
+        if (settings.autoCheckUpdates && System.currentTimeMillis() - settings.lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) {
+            checkForUpdates(manual = false)
+        }
         viewModelScope.launch {
             reload()
             // Fotos de versiones anteriores: miniaturas y encuadre de caras.
@@ -326,6 +360,59 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 UndoDelete(if (count == 1) "Se quitó 1 foto repetida" else "Se quitaron $count fotos repetidas", removed),
             )
         }
+    }
+
+    /** Busca una versión nueva en GitHub. Si [manual], avisa también cuando no hay nada nuevo. */
+    fun checkForUpdates(manual: Boolean) {
+        if (_checkingUpdates.value) return
+        _checkingUpdates.value = true
+        viewModelScope.launch {
+            runCatching { updater.checkForUpdate() }
+                .onSuccess { release ->
+                    settings.lastUpdateCheck = System.currentTimeMillis()
+                    if (release != null) {
+                        _update.value = UpdateState.Available(release)
+                    } else if (manual) {
+                        _messages.tryEmit("Tenés la última versión ($installedVersion)")
+                    }
+                }
+                .onFailure { if (manual) _messages.tryEmit("No se pudo buscar actualizaciones. Revisá la conexión.") }
+            _checkingUpdates.value = false
+        }
+    }
+
+    /** Descarga la versión nueva y abre el instalador de Android. */
+    fun downloadAndInstall() {
+        val release = (_update.value as? UpdateState.Available)?.release ?: return
+        viewModelScope.launch {
+            _update.value = UpdateState.Downloading(release, 0f)
+            runCatching {
+                val apk = updater.download(release) { progress -> _update.value = UpdateState.Downloading(release, progress) }
+                settings.saveReleaseNotes(release.versionCode, release.versionName, release.notes)
+                updater.install(apk)
+            }.onFailure {
+                _messages.tryEmit("No se pudo descargar la actualización. Probá de nuevo.")
+            }
+            // Si el usuario cancela la instalación, el aviso vuelve para intentarlo otra vez.
+            _update.value = UpdateState.Available(release)
+        }
+    }
+
+    fun canInstallUpdates(): Boolean = updater.canInstall()
+
+    fun installPermissionIntent() = updater.installPermissionIntent()
+
+    fun dismissUpdate() {
+        _update.value = null
+    }
+
+    fun dismissWhatsNew() {
+        _whatsNew.value = null
+    }
+
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        settings.autoCheckUpdates = enabled
+        _autoCheckUpdates.value = enabled
     }
 
     fun selectAll() {

@@ -4,6 +4,8 @@
 
     <!-- Solo para traer las fotos que el usuario elige en Google Fotos. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Para instalar las actualizaciones de Fototin desde la propia app. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -53,6 +55,10 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:theme="@style/Theme.Fototin.Viewer" />
+
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".widget.CollageWidgetReceiver"

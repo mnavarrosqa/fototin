@@ -3,7 +3,11 @@
 App de Android para tener widgets lindos con tus fotos en la pantalla de inicio.
 
 **Descargar:** [fototin.apk (última versión)](https://github.com/mnavarrosqa/fototin/releases/latest/download/fototin.apk).
-Abrilo desde el teléfono para instalar o actualizar. Requiere Android 9 o superior.
+Abrilo desde el teléfono para instalar. Requiere Android 9 o superior.
+
+**Actualizar:** la app busca versiones nuevas al abrirse (como mucho cada 6 horas) y muestra un
+aviso con las novedades y el botón **Actualizar**: descarga el APK y abre el instalador de Android.
+También se puede buscar a mano en Ajustes → Actualizaciones.
 
 ## Qué hace
 
