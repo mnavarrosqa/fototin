@@ -24,7 +24,6 @@ import app.fototin.data.WidgetSource
 import app.fototin.data.collageSelection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import app.fototin.data.Photo
 import app.fototin.data.PhotoRepository
 
 /** Un widget puesto en la pantalla de inicio, tal como se muestra en la app. */
