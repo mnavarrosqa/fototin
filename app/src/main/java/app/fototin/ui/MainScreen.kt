@@ -184,6 +184,8 @@ fun MainScreen(
     val screensaverSource by viewModel.screensaverSource.collectAsState()
     val memoriesNotification by viewModel.memoriesNotification.collectAsState()
     val googlePhotos by viewModel.googlePhotos.collectAsState()
+    // Mientras se eligen fotos de Google Fotos, el aviso con los botones tiene que estar a la vista.
+    val choosingGooglePhotos = googlePhotos != null
     val update by viewModel.update.collectAsState()
     val whatsNew by viewModel.whatsNew.collectAsState()
     val checkingUpdates by viewModel.checkingUpdates.collectAsState()
@@ -229,6 +231,12 @@ fun MainScreen(
     val gridState = rememberLazyStaggeredGridState()
     val atTop by remember { derivedStateOf { gridState.firstVisibleItemIndex == 0 } }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(choosingGooglePhotos) {
+        if (choosingGooglePhotos) {
+            tab = Tab.PHOTOS
+            gridState.scrollToItem(0)
+        }
+    }
     // Tocar «Fotos» estando en Fotos vuelve al principio, como en las apps de galería.
     val selectTab: (Tab) -> Unit = { item ->
         if (item == tab && item == Tab.PHOTOS) scope.launch { gridState.animateScrollToItem(0) }
@@ -347,6 +355,7 @@ fun MainScreen(
                         onReopenGooglePhotos = viewModel::reopenGooglePhotos,
                         onCheckGooglePhotos = viewModel::checkGooglePhotosNow,
                         onCancelGooglePhotos = viewModel::cancelGooglePhotos,
+                        onGooglePhotosInBrowser = viewModel::openGooglePhotosInBrowser,
                         selection = selection,
                         sortByTaken = sortByTaken,
                         gridSize = gridSize,
@@ -640,6 +649,7 @@ private fun PhotosTab(
     onReopenGooglePhotos: () -> Unit,
     onCheckGooglePhotos: () -> Unit,
     onCancelGooglePhotos: () -> Unit,
+    onGooglePhotosInBrowser: () -> Unit,
     selection: Set<String>,
     sortByTaken: Boolean,
     gridSize: Int,
@@ -725,7 +735,14 @@ private fun PhotosTab(
             }
             googlePhotos?.let { status ->
                 item(span = StaggeredGridItemSpan.FullLine) {
-                    GooglePhotosStatus(status, onCheck = onCheckGooglePhotos, onReopen = onReopenGooglePhotos, onCancel = onCancelGooglePhotos, modifier = side)
+                    GooglePhotosStatus(
+                        status,
+                        onCheck = onCheckGooglePhotos,
+                        onReopen = onReopenGooglePhotos,
+                        onBrowser = onGooglePhotosInBrowser,
+                        onCancel = onCancelGooglePhotos,
+                        modifier = side,
+                    )
                 }
             }
             importing?.let { progress ->
@@ -1251,7 +1268,14 @@ private fun UpdateBanner(state: UpdateState, onUpdate: () -> Unit, onDismiss: ()
 /** Mientras el usuario elige fotos en Google Fotos. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GooglePhotosStatus(status: String, onCheck: () -> Unit, onReopen: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+private fun GooglePhotosStatus(
+    status: String,
+    onCheck: () -> Unit,
+    onReopen: () -> Unit,
+    onBrowser: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -1266,6 +1290,7 @@ private fun GooglePhotosStatus(status: String, onCheck: () -> Unit, onReopen: ()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                 FilledTonalButton(onClick = onCheck) { Text("Ya elegí las fotos") }
                 TextButton(onClick = onReopen) { Text("Abrir Google Fotos") }
+                TextButton(onClick = onBrowser) { Text("Elegir desde el navegador") }
                 TextButton(onClick = onCancel) { Text("Cancelar") }
             }
         }

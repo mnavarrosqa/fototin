@@ -24,6 +24,7 @@ import app.fototin.widget.WidgetSupport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -202,15 +203,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _googlePhotos = MutableStateFlow<String?>(null)
     val googlePhotos: StateFlow<String?> = _googlePhotos.asStateFlow()
 
+    /** Cuenta de Google con la que se autorizó la elección (si Google la informa). */
+    private val _googleAccount = MutableStateFlow<String?>(null)
+    val googleAccount: StateFlow<String?> = _googleAccount.asStateFlow()
+
     /** Pantallas de Google Fotos que la actividad tiene que abrir. */
     private val _openUrl = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val openUrl: SharedFlow<String> = _openUrl.asSharedFlow()
 
+    /** La misma pantalla, pero forzando el navegador (por si la app de Google Fotos usa otra cuenta). */
+    private val _openInBrowser = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val openInBrowser: SharedFlow<String> = _openInBrowser.asSharedFlow()
+
     private var pickerUri: String? = null
 
-    /** Toques para consultar la sesión ya mismo (al volver a la app o con "Ya elegí las fotos"). */
-    private val pickerPokes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /**
+     * Toques para consultar la sesión ya mismo (al volver a la app o con "Ya elegí las fotos").
+     * Es un canal y no un flujo compartido: si el toque llega mientras se está consultando a
+     * Google, queda guardado en vez de perderse.
+     */
+    private val pickerPokes = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var manualPickerCheck = false
+    @Volatile private var resumedPickerCheck = false
 
     /** La app necesita un permiso nuevo de Google para retomar una elección que quedó pendiente. */
     private val _needsGoogleAuth = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -220,13 +234,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Abre la pantalla de Google Fotos para elegir fotos y, cuando el usuario termina, las descarga
      * e importa. [token] es el permiso que dio el usuario (solo lectura de lo que elija).
      */
-    fun pickFromGooglePhotos(token: String) {
+    fun pickFromGooglePhotos(token: String, account: String?) {
+        _googleAccount.value = account
         settings.clearPendingPicker()
         runGooglePhotos(token, resume = null)
     }
 
     /** Retoma la elección que quedó pendiente si Android cerró la app mientras estaba en Google Fotos. */
-    fun resumeGooglePhotos(token: String) {
+    fun resumeGooglePhotos(token: String, account: String?) {
+        _googleAccount.value = account
         val pending = settings.pendingPicker() ?: return
         runGooglePhotos(token, resume = pending)
     }
@@ -234,7 +250,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Al volver a la app: consultar ya mismo, o retomar una elección pendiente. */
     fun onAppResumed() {
         if (googleJob?.isActive == true) {
-            pickerPokes.tryEmit(Unit)
+            resumedPickerCheck = true
+            pickerPokes.trySend(Unit)
         } else if (settings.pendingPicker() != null) {
             _needsGoogleAuth.tryEmit(Unit)
         }
@@ -243,13 +260,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Botón "Ya elegí las fotos": consulta ahora y, si Google todavía no lo registró, lo explica. */
     fun checkGooglePhotosNow() {
         manualPickerCheck = true
-        pickerPokes.tryEmit(Unit)
+        pickerPokes.trySend(Unit)
     }
 
     private fun runGooglePhotos(token: String, resume: Settings.PendingPicker?) {
         googleJob?.cancel()
         val albumId = resume?.albumId ?: _currentAlbumId.value
         googleJob = viewModelScope.launch {
+            // Un toque viejo no debe adelantar la primera consulta.
+            pickerPokes.tryReceive()
             val picker = GooglePhotosPicker(token)
             var sessionId: String? = resume?.sessionId
             var finished = false
@@ -268,22 +287,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 sessionId = session.id
                 pickerUri = session.pickerUri
-                _googlePhotos.value = "Elegí las fotos en Google Fotos, tocá «Listo» y volvé a Fototin."
+                // Lo que pasó antes de abrir Google Fotos (como volver de la pantalla de permiso) no cuenta.
+                pickerPokes.tryReceive()
+                manualPickerCheck = false
+                resumedPickerCheck = false
+                _googlePhotos.value = waitingText()
                 // Google avisa por la sesión cuándo terminó la elección. Se consulta cada pocos
                 // segundos, y enseguida al volver a la app o al tocar "Ya elegí las fotos".
                 val deadline = System.currentTimeMillis() + session.timeoutMs
                 while (!session.ready) {
                     if (System.currentTimeMillis() > deadline) error("Se venció el tiempo para elegir las fotos")
-                    withTimeoutOrNull(session.pollIntervalMs) { pickerPokes.first() }
+                    withTimeoutOrNull(session.pollIntervalMs) { pickerPokes.receive() }
+                    val asked = manualPickerCheck || resumedPickerCheck
+                    if (asked) _googlePhotos.value = "Consultando a Google Fotos…"
                     session = picker.getSession(session.id)
                     Log.d(TAG, "Sesión ${session.id}: elegidas=${session.ready}")
-                    if (!session.ready && manualPickerCheck) {
-                        _messages.tryEmit(
-                            "Google Fotos todavía no registró tu elección. Tocá «Listo» en Google Fotos con " +
-                                "la misma cuenta que autorizaste en Fototin.",
-                        )
+                    if (!session.ready && asked) {
+                        // Volvió a la app (o tocó el botón) y Google todavía no tiene la elección:
+                        // casi siempre es porque Google Fotos está abierto con otra cuenta.
+                        _googlePhotos.value = notReadyText()
+                        if (manualPickerCheck) _messages.tryEmit("Google Fotos todavía no registró tu elección")
                     }
                     manualPickerCheck = false
+                    resumedPickerCheck = false
                 }
                 _googlePhotos.value = "Trayendo las fotos elegidas…"
                 val items = picker.listItems(session.id).filter { it.isPhoto }
@@ -332,6 +358,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _importing.value = null
                 pickerUri = null
                 manualPickerCheck = false
+                resumedPickerCheck = false
                 // Si la app se cerró a mitad de camino, la sesión queda guardada para retomarla.
                 if (finished) {
                     settings.clearPendingPicker()
@@ -346,6 +373,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun reopenGooglePhotos() {
         pickerUri?.let { _openUrl.tryEmit(it) }
     }
+
+    /** Abre la elección en el navegador, donde se ve y se puede cambiar la cuenta de Google. */
+    fun openGooglePhotosInBrowser() {
+        pickerUri?.let { _openInBrowser.tryEmit(it) }
+    }
+
+    private fun accountHint(): String =
+        _googleAccount.value?.let { "con la cuenta $it" } ?: "con la misma cuenta que autorizaste"
+
+    private fun waitingText() = "Elegí las fotos en Google Fotos ${accountHint()}, tocá «Listo» y volvé a Fototin."
+
+    private fun notReadyText() =
+        "Google Fotos todavía no avisa que terminaste. Si ya tocaste «Listo», seguramente Google Fotos " +
+            "está abierto con otra cuenta: elegí las fotos desde el navegador ${accountHint()}."
 
     fun cancelGooglePhotos() {
         settings.clearPendingPicker()
