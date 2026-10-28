@@ -161,23 +161,36 @@ object CollageStyler {
     ) {
         val n = sources.size
         val horizontal = bounds.width() >= bounds.height()
-        val long = max(bounds.width(), bounds.height())
-        val short = min(bounds.width(), bounds.height())
+        // Margen para la sombra: lo que queda afuera del widget se corta.
+        val area = PhotoStyler.inset(bounds, 6 * dp)
+        val long = max(area.width(), area.height())
+        val short = min(area.width(), area.height())
+        val angles = List(n) { i -> ANGLES[(i + seed.mod(ANGLES.size)) % ANGLES.size] }
+        // Lo que ocupa una tarjeta girada, a lo largo y a lo ancho de la fila.
+        val maxTurn = Math.toRadians(angles.maxOf { kotlin.math.abs(it) }.toDouble())
+        val sin = kotlin.math.sin(maxTurn).toFloat()
+        val cos = kotlin.math.cos(maxTurn).toFloat()
+        fun rotatedAlong(w: Float) = if (horizontal) w * cos + w * 1.2f * sin else w * sin + w * 1.2f * cos
+        fun rotatedAcross(w: Float) = if (horizontal) w * sin + w * 1.2f * cos else w * cos + w * 1.2f * sin
         // Tarjetas que se superponen un poco: cada una ocupa ~60% del espacio que le toca.
-        var cardW = min(short * 0.8f, long / (n * 0.62f + 0.45f))
-        cardW = min(cardW, short * 0.86f / 1.2f * if (horizontal) 1f else 1.2f)
+        var cardW = min(short, long / (n * 0.62f + 0.45f))
+        // Que girada entre a lo ancho, con lugar para correrse un poco hacia los costados.
+        cardW = min(cardW, short / (rotatedAcross(1f) * 1.08f))
+        // Y que la primera y la última no se salgan por las puntas.
+        cardW = min(cardW, long / (rotatedAlong(1f) + (n - 1) * 0.62f * (if (horizontal) 1f else 1.2f)))
         val cardH = cardW * 1.2f
-        val along = if (horizontal) cardW else cardH
-        val start = along * 0.58f
-        val end = long - along * 0.58f
-        val crossRoom = (short - (if (horizontal) cardH else cardW)) / 2f
+        val alongHalf = rotatedAlong(cardW) / 2f
+        val acrossHalf = rotatedAcross(cardW) / 2f
+        val start = (if (horizontal) area.left else area.top) + alongHalf
+        val end = (if (horizontal) area.right else area.bottom) - alongHalf
+        val crossRoom = (short / 2f - acrossHalf).coerceAtLeast(0f)
         sources.forEachIndexed { i, source ->
             val t = if (n == 1) 0.5f else i / (n - 1f)
             val a = start + (end - start) * t
-            val wobble = (if (i % 2 == 0) -1 else 1) * crossRoom * 0.55f
-            val cx = if (horizontal) a else bounds.centerX() + wobble
-            val cy = if (horizontal) bounds.centerY() + wobble else a
-            val angle = ANGLES[(i + seed.mod(ANGLES.size)) % ANGLES.size]
+            val wobble = (if (i % 2 == 0) -1 else 1) * crossRoom * 0.8f
+            val cx = if (horizontal) a else area.centerX() + wobble
+            val cy = if (horizontal) area.centerY() + wobble else a
+            val angle = angles[i]
             canvas.save()
             canvas.rotate(angle, cx, cy)
             val card = RectF(cx - cardW / 2, cy - cardH / 2, cx + cardW / 2, cy + cardH / 2)
@@ -272,10 +285,16 @@ object CollageStyler {
     // ---- Pila: fotos apiladas, la primera arriba de todo ----
 
     private fun drawStack(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float, seed: Int) {
-        val card = RectF(bounds).apply { inset(width() * 0.13f, height() * 0.13f) }
-        val border = max(4 * dp, min(card.width(), card.height()) * 0.04f)
+        val loose = RectF(bounds).apply { inset(width() * 0.08f, height() * 0.08f) }
         val angles = floatArrayOf(0f, -7f, 6f, -11f, 10f)
-        val shift = min(card.width(), card.height()) * 0.05f
+        val turn = angles.take(sources.size).maxOf { kotlin.math.abs(it) }
+        val shift = min(loose.width(), loose.height()) * 0.05f
+        // Las de atrás van giradas y corridas: todas tienen que entrar sin que se corten las puntas.
+        val card = PhotoStyler.scaled(
+            loose,
+            PhotoStyler.rotatedFit(loose.width(), loose.height(), turn, bounds.width() - 12 * dp - shift * 2, bounds.height() - 12 * dp),
+        )
+        val border = max(4 * dp, min(card.width(), card.height()) * 0.04f)
         // De atrás para adelante.
         for (i in sources.indices.reversed()) {
             val angle = if (i == 0) (seed.mod(5) - 2) * 0.6f else angles[i % angles.size]
@@ -377,8 +396,14 @@ object CollageStyler {
     private fun drawScrapbook(canvas: Canvas, sources: List<StyledSource>, bounds: RectF, dp: Float, seed: Int) {
         val area = PhotoStyler.inset(bounds, 10 * dp)
         val cells = mosaicCells(area, sources.size, 14 * dp)
-        cells.zip(sources).forEachIndexed { i, (cell, source) ->
+        cells.zip(sources).forEachIndexed { i, (loose, source) ->
             val angle = ANGLES[(i + seed.mod(ANGLES.size)) % ANGLES.size] * 0.45f
+            // Girada (y con la cinta arriba) no puede pisar a las vecinas ni salirse del widget.
+            val tapeRoom = if (i % 2 == 0) max(14 * dp, loose.height() * 0.09f) / 2f else 0f
+            val cell = PhotoStyler.scaled(
+                loose,
+                PhotoStyler.rotatedFit(loose.width(), loose.height(), angle, loose.width() + 12 * dp, loose.height() + 12 * dp - tapeRoom),
+            )
             canvas.save()
             canvas.rotate(angle, cell.centerX(), cell.centerY())
             canvas.drawRect(cell, PhotoStyler.shadowPaint(Color.WHITE, dp))

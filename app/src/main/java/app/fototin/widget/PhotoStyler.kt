@@ -185,9 +185,15 @@ object PhotoStyler {
         // Una leve inclinación, como una foto apoyada sobre la mesa.
         canvas.save()
         canvas.rotate(angle, bounds.centerX(), bounds.centerY())
-        val card = RectF(bounds).apply {
+        val loose = RectF(bounds).apply {
             inset(max(10 * dp, width() * 0.05f), max(if (tape) 16 * dp else 10 * dp, height() * 0.06f))
         }
+        // Girada, la tarjeta (y la cinta que sobresale arriba) tiene que entrar con lugar para la sombra.
+        val tapeRoom = if (tape) max(14 * dp, loose.height() * 0.09f) else 0f
+        val card = scaled(
+            loose,
+            rotatedFit(loose.width(), loose.height(), angle, bounds.width() - 12 * dp, bounds.height() - 12 * dp - tapeRoom),
+        )
         canvas.drawRoundRect(card, 3 * dp, 3 * dp, shadowPaint(Color.WHITE, dp))
         val margin = min(card.width(), card.height()) * 0.06f
         val photo = RectF(card.left + margin, card.top + margin, card.right - margin, card.bottom - margin * 3.8f)
@@ -569,6 +575,24 @@ object PhotoStyler {
     }
 
     internal fun inset(rect: RectF, by: Float) = RectF(rect).apply { inset(by, by) }
+
+    /**
+     * Cuánto achicar un rectángulo de [w] × [h] para que, girado [degrees] grados, entre en
+     * [maxW] × [maxH]. Sin esto, las puntas de las fotos inclinadas se salen del widget y se cortan.
+     */
+    internal fun rotatedFit(w: Float, h: Float, degrees: Float, maxW: Float, maxH: Float): Float {
+        val turn = Math.toRadians(degrees.toDouble())
+        val sin = kotlin.math.abs(kotlin.math.sin(turn)).toFloat()
+        val cos = kotlin.math.abs(kotlin.math.cos(turn)).toFloat()
+        return min(1f, min(maxW / (w * cos + h * sin), maxH / (w * sin + h * cos)))
+    }
+
+    /** [rect] achicado por [factor] alrededor de su centro. */
+    internal fun scaled(rect: RectF, factor: Float): RectF {
+        val w = rect.width() * factor / 2f
+        val h = rect.height() * factor / 2f
+        return RectF(rect.centerX() - w, rect.centerY() - h, rect.centerX() + w, rect.centerY() + h)
+    }
 
     /** Área centrada dentro de [bounds] que no es más ancha que [maxAspect] veces su alto. */
     private fun centeredArea(bounds: RectF, maxAspect: Float): RectF {
